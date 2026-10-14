@@ -1,0 +1,58 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: telemed-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/basetélé}
+    username: postgres
+    password: ritej
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS:true}
+          connectiontimeout: ${MAIL_SMTP_CONNECTION_TIMEOUT:5000}
+          timeout: ${MAIL_SMTP_READ_TIMEOUT:5000}
+          writetimeout: ${MAIL_SMTP_WRITE_TIMEOUT:5000}
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+      access-token-ttl: ${JWT_ACCESS_TTL:PT15M}
+      refresh-token-ttl: ${JWT_REFRESH_TTL:P14D}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  appointment:
+    zone-id: ${APPOINTMENT_ZONE_ID:Europe/Paris}
+  bootstrap:
+    admin:
+      email: ${BOOTSTRAP_ADMIN_EMAIL:admin@gmail.com}
+      password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  email:
+    from: ${MAIL_FROM:no-reply@example.test}
+    delivery-interval-ms: ${MAIL_DELIVERY_INTERVAL_MS:30000}
+  llm:
+    prescription:
+      endpoint: ${LLM_PRESCRIPTION_ENDPOINT:}
+      api-key: ${LLM_PRESCRIPTION_API_KEY:}
+      model: ${LLM_PRESCRIPTION_MODEL:}
+  prescription:
+    signing-secret: ${PRESCRIPTION_SIGNING_SECRET:}

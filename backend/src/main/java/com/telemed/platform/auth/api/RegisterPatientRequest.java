@@ -1,0 +1,10 @@
+package com.telemed.platform.auth.api;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record RegisterPatientRequest(
+        @NotBlank @Email @Size(max = 254) String email,
+        @NotBlank @Size(min = 12, max = 72) String password) {
+}
