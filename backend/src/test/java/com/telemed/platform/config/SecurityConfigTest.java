@@ -21,6 +21,7 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.core.Authentication;
+import org.springframework.mock.env.MockEnvironment;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +56,18 @@ class SecurityConfigTest {
         assertThat(cors.getAllowCredentials()).isFalse();
         assertThatThrownBy(() -> securityConfig.corsConfigurationSource("*"))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void jwtSecretIsGeneratedOnlyForExplicitDevelopmentProfile() {
+        MockEnvironment developmentEnvironment = new MockEnvironment();
+        developmentEnvironment.setActiveProfiles("dev");
+        var developmentKey = securityConfig.jwtSecretKey("", developmentEnvironment);
+
+        assertThat(developmentKey.getEncoded()).hasSizeGreaterThanOrEqualTo(32);
+        assertThatThrownBy(() -> securityConfig.jwtSecretKey("", new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("JWT_SECRET");
     }
 
     @Test

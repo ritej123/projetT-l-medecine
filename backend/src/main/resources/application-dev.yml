@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/telemed}
+    username: ${DB_USERNAME:telemed}
+    password: ${DB_PASSWORD:}
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+  prescription:
+    signing-secret: ${PRESCRIPTION_SIGNING_SECRET:}

@@ -47,6 +47,16 @@ public class GlobalExceptionHandler {
         return errorResponse(HttpStatus.UNAUTHORIZED, "Authentification invalide.", Map.of());
     }
 
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException exception) {
+        return errorResponse(HttpStatus.FORBIDDEN, "Vous n’êtes pas autorisé à accéder à cette ressource.", Map.of());
+    }
+
+    @ExceptionHandler(TeleconsultationAccessDeniedException.class)
+    ResponseEntity<ApiError> handleTeleconsultationAccessDenied(TeleconsultationAccessDeniedException exception) {
+        return errorResponse(HttpStatus.FORBIDDEN, exception.getMessage(), Map.of());
+    }
+
     @ExceptionHandler(NotFoundException.class)
     ResponseEntity<ApiError> handleNotFound(NotFoundException exception) {
         return errorResponse(HttpStatus.NOT_FOUND, exception.getMessage(), Map.of());

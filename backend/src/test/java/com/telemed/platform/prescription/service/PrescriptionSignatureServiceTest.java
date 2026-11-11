@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
 
 class PrescriptionSignatureServiceTest {
 
@@ -25,10 +26,20 @@ class PrescriptionSignatureServiceTest {
     }
 
     @Test
-    void refusesToSignWithoutASufficientlyLongSecret() {
-        PrescriptionSignatureService unconfigured = new PrescriptionSignatureService("");
+    void refusesToStartWithoutASufficientlyLongSecretOutsideDevelopment() {
+        assertThatThrownBy(() -> new PrescriptionSignatureService(""))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("PRESCRIPTION_SIGNING_SECRET");
+    }
 
-        assertThatThrownBy(() -> unconfigured.sign(UUID.randomUUID(), UUID.randomUUID(), "now", "hash"))
-                .isInstanceOf(com.telemed.platform.common.exception.ServiceUnavailableException.class);
+    @Test
+    void generatesAnEphemeralSecretOnlyForDevelopmentProfile() {
+        MockEnvironment developmentEnvironment = new MockEnvironment();
+        developmentEnvironment.setActiveProfiles("dev");
+        PrescriptionSignatureService developmentService =
+                new PrescriptionSignatureService("", developmentEnvironment);
+
+        assertThat(developmentService.sign(UUID.randomUUID(), UUID.randomUUID(), "now", "hash"))
+                .isNotBlank();
     }
 }

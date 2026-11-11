@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Set;
 
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import com.telemed.platform.teleconsultation.service.TeleconsultationAccessDeniedException;
 
 class GlobalExceptionHandlerTest {
 

@@ -10,29 +10,38 @@ Socle de plateforme de télémédecine avec Angular, Spring Boot, PostgreSQL et 
 
 ## Démarrage rapide
 
-1. Démarrer PostgreSQL :
+1. Préparer les variables locales et les secrets (le fichier `.env` est ignoré par Git) :
+
+   ```powershell
+   Copy-Item .env.example .env
+   # Générer une valeur différente pour chaque secret, puis les inscrire dans .env :
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # DB_PASSWORD
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # JWT_SECRET
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # PRESCRIPTION_SIGNING_SECRET
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # BOOTSTRAP_ADMIN_PASSWORD (facultatif si un admin existe déjà)
+   ```
+
+2. Démarrer PostgreSQL :
 
    ```powershell
    docker compose up -d db
    ```
 
-2. Démarrer l'API (PowerShell) :
+3. Charger les variables de `.env` dans le terminal PowerShell qui lancera l'API, puis démarrer le backend en profil de développement :
 
    ```powershell
-   $env:DB_URL = "jdbc:postgresql://localhost:5433/basetélé"
-   $env:DB_USERNAME = basetélé
-   $env:DB_PASSWORD = ritej
-   $env:JWT_SECRET = 
-   $env:PRESCRIPTION_SIGNING_SECRET = "remplace-par-une-valeur-secrète-d-au-moins-32-octets"
-   $env:BOOTSTRAP_ADMIN_EMAIL = "admin@gmail.com"
-   $env:BOOTSTRAP_ADMIN_PASSWORD = "RemplaceParUnMotDePasseFortDe12A72Octets"
+   Get-Content .env | Where-Object { $_ -match '^[A-Za-z_][A-Za-z0-9_]*=' } | ForEach-Object {
+     $name, $value = $_ -split '=', 2
+     [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+   }
+   $env:SPRING_PROFILES_ACTIVE = "dev"
    cd backend
    mvn spring-boot:run
    ```
 
-   Le secret JWT et le secret de signature des ordonnances doivent contenir au moins 32 octets. Configurez l'adresse `admin@gmail.com` et son mot de passe bootstrap (12 à 72 octets). Au premier démarrage, le compte ADMIN est créé uniquement si cette adresse n'existe pas ; si elle est déjà utilisée par un compte non administrateur, l'application refuse de démarrer plutôt que d'élever silencieusement ses droits. Un compte ADMIN existant et son mot de passe ne sont pas modifiés. En production, fournissez ces valeurs depuis un gestionnaire de secrets, sans les stocker dans le dépôt.
+   Les secrets JWT et de signature doivent chacun contenir au moins 32 octets. Le profil `dev` génère des clés éphémères si elles ne sont pas définies ; elles sont perdues au redémarrage et ne conviennent jamais aux données persistantes. Configurez `BOOTSTRAP_ADMIN_EMAIL` et son mot de passe (12 à 72 octets) pour créer le premier administrateur. Un compte ADMIN existant et son mot de passe ne sont pas modifiés ; une adresse déjà attribuée à un autre rôle bloque le démarrage.
 
-3. Démarrer Angular dans un autre terminal :
+4. Démarrer Angular dans un autre terminal :
 
    ```powershell
    cd frontend
@@ -42,9 +51,11 @@ Socle de plateforme de télémédecine avec Angular, Spring Boot, PostgreSQL et 
 
    L'interface est disponible sur <http://localhost:4200> et l'API sur <http://localhost:8080>.
 
-   Les parcours Angular incluent l'accueil, l'inscription/connexion, les tableaux de bord patient, médecin et administrateur, ainsi que la réservation mensuelle des créneaux libres. Le navigateur conserve les jetons dans `sessionStorage`; les routes patient/médecin/administrateur sont protégées par le rôle du jeton et chaque appel API envoie le jeton d'accès. Après connexion, `admin@gmail.com` ouvre l'espace ADMIN (`/admin`) pour consulter les statistiques, gérer les comptes et rendez-vous, valider les médecins et consulter le journal d'audit. L'espace patient permet de réserver, consulter ses ordonnances et annuler ses rendez-vous actifs. L'espace médecin s'appuie sur les API sécurisées pour consulter les statistiques, gérer son agenda et ses indisponibilités, suivre ses patients autorisés, rédiger des comptes rendus, gérer les ordonnances et retrouver ses notifications.
+   Les parcours Angular incluent l'accueil, l'inscription/connexion, les tableaux de bord patient, médecin et administrateur, ainsi que la réservation mensuelle des créneaux libres. Le navigateur conserve les jetons dans `sessionStorage`; les routes patient/médecin/administrateur sont protégées par le rôle du jeton et chaque appel API envoie le jeton d'accès. Un compte doté du rôle ADMIN ouvre l'espace `/admin` pour consulter les statistiques, gérer les comptes et rendez-vous, valider les médecins et consulter le journal d'audit. L'espace patient permet de réserver, consulter ses ordonnances et annuler ses rendez-vous actifs. L'espace médecin s'appuie sur les API sécurisées pour consulter les statistiques, gérer son agenda et ses indisponibilités, suivre ses patients autorisés, rédiger des comptes rendus, gérer les ordonnances et retrouver ses notifications.
 
-Sans Docker, créez une base PostgreSQL `telemed` et un utilisateur `telemed`, puis fournissez `DB_URL`, `DB_USERNAME` et `DB_PASSWORD`.
+Le profil `prod` (à activer avec `SPRING_PROFILES_ACTIVE=prod`) exige `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `PRESCRIPTION_SIGNING_SECRET` et `CORS_ALLOWED_ORIGINS`. Le backend refuse aussi de démarrer hors profil `dev` si le mot de passe de base est absent ou si les secrets cryptographiques font moins de 32 octets. En production, injectez les secrets depuis un gestionnaire de secrets ; ne chargez pas `.env` depuis le dépôt.
+
+Sans Docker, créez une base PostgreSQL `telemed` et un utilisateur `telemed` avec un mot de passe non vide, puis fournissez les variables de connexion.
 
 ## Structure
 
@@ -77,7 +88,7 @@ Les routes `/api/v1/patient/**`, `/api/v1/doctor/**` et `/api/v1/admin/**` sont 
 - `GET` et `PUT /api/v1/doctor/appointments/{id}/consultation` enregistrent le compte rendu, les observations et le diagnostic, avec une révision conservée à chaque sauvegarde. Une consultation finalisée devient en lecture seule et termine le rendez-vous.
 - `/api/v1/doctor/profile` permet au médecin de gérer les informations de contact sans changer son rôle, son statut de vérification ou le statut de vérification de son numéro professionnel.
 - `/api/v1/doctor/notifications` retourne les notifications du médecin connecté et permet de marquer une notification comme lue ; les rappels in-app sont créés pour les rendez-vous proches.
-- `GET /api/v1/doctor/appointments/{id}/prescription` permet de retrouver l'ordonnance liée au rendez-vous ; la rédaction reste manuelle et la validation/signature existante demeure requise.
+- `GET /api/v1/doctor/appointments/{id}/prescription` permet de retrouver l'ordonnance liée au rendez-vous. Le médecin peut rédiger et enregistrer un brouillon manuel pendant un rendez-vous confirmé en cours ou après sa fin, depuis le parcours de consultation ; le brouillon n'est pas visible du patient avant validation et signature.
 - `GET /api/v1/patient/doctors` retourne l'annuaire des médecins et leurs spécialités, sans exposer les comptes utilisateur.
 - `GET /api/v1/patient/appointments/doctors/{doctorId}/slots?from=YYYY-MM-DD&to=YYYY-MM-DD` retourne uniquement les créneaux libres, pour une période maximale de 31 jours.
 - `POST /api/v1/patient/appointments` réserve un début de créneau exact ; une annulation médecin/patient libère le créneau.
@@ -85,8 +96,11 @@ Les routes `/api/v1/patient/**`, `/api/v1/doctor/**` et `/api/v1/admin/**` sont 
 - `POST /api/v1/doctor/appointments/{appointmentId}/prescription/draft` : génère un brouillon d'ordonnance à partir des notes, après anonymisation côté serveur, pendant la plage d'une consultation confirmée ou après un rendez-vous terminé.
 - `PUT /api/v1/doctor/prescriptions/{id}` : modification du brouillon ; `GET .../{id}/history` : historique des révisions, réservé au médecin traitant.
 - `PATCH /api/v1/doctor/prescriptions/{id}/validate` : relecture/validation et signature par le médecin ; PDF disponible à `/api/v1/doctor/prescriptions/{id}/pdf` et pour le patient concerné à `/api/v1/patient/prescriptions/{id}/pdf`.
+- La validation nécessite `PRESCRIPTION_SIGNING_SECRET` configuré côté serveur avec au moins 32 octets. Sans cette configuration, l'API retourne HTTP 503 et conserve le brouillon sans prétendre qu'il est signé.
 - `GET /api/v1/health` : endpoint public ne retournant que l'état du service.
-- `/teleconsultation/{appointmentId}` : salle vidéo Angular, accessible avec un jeton de session valide.
+- `/teleconsultation/{appointmentId}` : salle vidéo Angular. Avant d’activer les périphériques, `GET /api/v1/teleconsultations/{appointmentId}/access` vérifie que l’utilisateur est le patient ou le médecin du rendez-vous, que celui-ci est confirmé et que l’horaire de consultation est en cours. La signalisation STOMP est authentifiée par JWT et réapplique cette autorisation aux abonnements et messages.
+
+La salle utilise WebRTC pour l’audio/vidéo, STOMP sur `/ws` pour l’échange temporaire d’offres, réponses, candidats ICE et messages de chat, et permet le partage d’écran ainsi que la fin d’appel. Le chat reste en mémoire de la salle et n’est pas enregistré. La caméra et le microphone nécessitent l’autorisation du navigateur ; l’accès aux périphériques et le partage d’écran requièrent HTTPS en production (localhost est accepté en développement). La configuration ICE utilise un serveur STUN par défaut ; pour les réseaux restrictifs, configurez un TURN fiable via le fournisseur `TELEMED_ICE_SERVERS` de l’application. N’intégrez pas de secret TURN permanent dans le frontend.
 
 Les routes métier exigent `Authorization: Bearer <access_token>` et vérifient le rôle requis. Le secret JWT doit être fourni par environnement. Les mots de passe sont hachés avec BCrypt (facteur 12). La limite de connexion est de 5 tentatives par minute et par adresse réseau observée par le serveur ; le compteur est local au processus, à remplacer par un stockage partagé avant un déploiement multi-instance ou derrière un proxy. `CORS_ALLOWED_ORIGINS` accepte une liste d'origines exactes séparées par des virgules, sans joker ; les credentials cross-origin sont désactivés.
 
@@ -96,7 +110,7 @@ Les migrations additives `V6` et `V7` étendent le profil professionnel, les com
 
 Les confirmations sont placées dans une outbox transactionnelle à l'enregistrement ; un rappel est planifié une heure avant le rendez-vous si celui-ci est réservé plus d'une heure à l'avance. Les notifications sont envoyées par SMTP (`MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`) avec reprises et délai exponentiel. En cas d'annulation, les messages encore en attente sont supprimés de la file. Le fuseau horaire est configurable avec `APPOINTMENT_ZONE_ID` (défaut `Europe/Paris`). Configurez SMTP pour activer l'envoi réel.
 
-Les dossiers patients et contenus d'ordonnance sont des données de santé : ils ne doivent jamais être écrits dans les journaux. Ce squelette ne met pas en œuvre le chiffrement applicatif des données au repos, l'audit réglementaire, le consentement, la politique complète de conservation ni l'infrastructure HDS ; ces contrôles restent indispensables avant une mise en production.
+Les dossiers patients et contenus d'ordonnance sont des données de santé : ils ne doivent jamais être écrits dans les journaux. Ce squelette ne met pas en œuvre le chiffrement applicatif des données au repos, l'audit réglementaire, le consentement ni la politique complète de conservation ; ces contrôles ainsi que la conformité à la loi tunisienne n° 2004-63 et aux exigences de l'INPDP restent à établir avant une mise en production.
 
 ### Brouillons d'ordonnance assistés
 
@@ -110,7 +124,7 @@ La route Angular `/teleconsultation/{appointmentId}` propose la caméra, le micr
 
 Les messages STOMP utilisent `/app/teleconsultations/{appointmentId}/{join|leave|signal}` et la salle `/topic/teleconsultations/{appointmentId}`. L'audio et la vidéo sont échangés en pair-à-pair via WebRTC ; le serveur ne les reçoit ni ne les stocke. Le chat et les descriptions de session transitent par la signalisation et ne sont pas persistés. Les origines STOMP doivent être configurées explicitement avec `CORS_ALLOWED_ORIGINS`. En production, terminez TLS (WSS/HTTPS), et fournissez un serveur TURN avec identifiants éphémères pour les réseaux restrictifs ; `TELEMED_API_BASE_URL` et `TELEMED_ICE_SERVERS` sont des tokens Angular surchargeables au bootstrap. La configuration par défaut n'inclut qu'un serveur STUN public et convient au développement, pas à une garantie de connectivité en production.
 
-La plateforme reste un socle : chiffrement applicatif des dossiers au repos, audit réglementaire, consentement, conservation, infrastructure HDS, gestion de consentement caméra/micro et procédures opérationnelles restent nécessaires avant tout usage clinique.
+La plateforme reste un socle : chiffrement applicatif des dossiers au repos, audit réglementaire, consentement, conservation, conformité à la loi tunisienne n° 2004-63 et aux exigences de l'INPDP, gestion du consentement caméra/micro et procédures opérationnelles restent nécessaires avant tout usage clinique.
 
 ## Tests
 
