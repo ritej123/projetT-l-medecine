@@ -1,14 +1,11 @@
 package com.telemed.platform.prescription.service;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 import com.telemed.platform.appointment.domain.Appointment;
 import com.telemed.platform.appointment.domain.AppointmentStatus;
@@ -19,6 +16,7 @@ import com.telemed.platform.common.exception.NotFoundException;
 import com.telemed.platform.patient.domain.Patient;
 import com.telemed.platform.patient.repository.PatientRepository;
 import com.telemed.platform.prescription.api.PrescriptionResponse;
+import com.telemed.platform.prescription.api.PatientPrescriptionResponse;
 import com.telemed.platform.prescription.domain.Prescription;
 import com.telemed.platform.prescription.domain.PrescriptionStatus;
 import com.telemed.platform.prescription.domain.PrescriptionRevision;
@@ -37,7 +35,6 @@ public class PrescriptionService {
     private final PrescriptionRepository prescriptionRepository;
     private final PrescriptionRevisionRepository revisionRepository;
     private final PrescriptionMapper prescriptionMapper;
-    private final PrescriptionSignatureService signatureService;
     private final Clock clock;
     private final ZoneId appointmentZone;
 
@@ -47,7 +44,6 @@ public class PrescriptionService {
             PrescriptionRepository prescriptionRepository,
             PrescriptionRevisionRepository revisionRepository,
             PrescriptionMapper prescriptionMapper,
-            PrescriptionSignatureService signatureService,
             Clock clock,
             ZoneId appointmentZone) {
         this.appointmentRepository = appointmentRepository;
@@ -55,7 +51,6 @@ public class PrescriptionService {
         this.prescriptionRepository = prescriptionRepository;
         this.revisionRepository = revisionRepository;
         this.prescriptionMapper = prescriptionMapper;
-        this.signatureService = signatureService;
         this.clock = clock;
         this.appointmentZone = appointmentZone;
     }
@@ -73,8 +68,9 @@ public class PrescriptionService {
         if (!appointment.getDoctor().getUser().getEmail().equalsIgnoreCase(doctorEmail)) {
             throw new NotFoundException("Rendez-vous introuvable.");
         }
-        if (appointment.getStatus() != AppointmentStatus.DONE) {
-            throw new InvalidRequestException("Une ordonnance ne peut être créée qu'après le rendez-vous.");
+        if (!PrescriptionDraftEligibility.isAllowed(appointment, clock, appointmentZone)) {
+            throw new InvalidRequestException(
+                    "Le brouillon d'ordonnance est disponible pendant le rendez-vous confirmé ou après sa fin.");
         }
         if (prescriptionRepository.findByAppointmentId(appointmentId).isPresent()) {
             throw new ConflictException("Une ordonnance existe déjà pour ce rendez-vous.");
@@ -85,13 +81,12 @@ public class PrescriptionService {
     }
 
     @Transactional(readOnly = true)
-    public PrescriptionResponse findForDoctorAppointment(String doctorEmail, UUID appointmentId) {
+    public Optional<PrescriptionResponse> findForDoctorAppointment(String doctorEmail, UUID appointmentId) {
         Appointment appointment = appointmentRepository.findById(appointmentId)
                 .filter(candidate -> candidate.getDoctor().getUser().getEmail().equalsIgnoreCase(doctorEmail))
                 .orElseThrow(() -> new NotFoundException("Rendez-vous introuvable."));
-        Prescription prescription = prescriptionRepository.findByAppointmentId(appointment.getId())
-                .orElseThrow(() -> new NotFoundException("Aucune ordonnance n'est enregistrée."));
-        return prescriptionMapper.toResponse(prescription);
+        return prescriptionRepository.findByAppointmentId(appointment.getId())
+                .map(prescriptionMapper::toResponse);
     }
 
     @Transactional
@@ -131,6 +126,11 @@ public class PrescriptionService {
         if (prescription.getStatus() != PrescriptionStatus.DRAFT) {
             throw new InvalidRequestException("Seul un brouillon peut être modifié.");
         }
+        if (!PrescriptionDraftEligibility.isAllowed(
+                prescription.getAppointment(), clock, appointmentZone)) {
+            throw new InvalidRequestException(
+                    "Le brouillon ne peut être modifié que pendant le rendez-vous confirmé ou après sa fin.");
+        }
         prescription.updateDraft(content);
         addRevision(prescription, prescription.getAppointment().getDoctor().getUser().getId(), "EDITED");
         return prescriptionMapper.toResponse(prescription);
@@ -142,14 +142,23 @@ public class PrescriptionService {
         if (prescription.getStatus() != PrescriptionStatus.DRAFT) {
             throw new InvalidRequestException("Cette ordonnance est déjà validée.");
         }
-        Instant signedAt = clock.instant();
-        String contentSha256 = sha256(prescription.getContent());
+        if (!PrescriptionDraftEligibility.isAllowed(
+                prescription.getAppointment(), clock, appointmentZone)) {
+            throw new InvalidRequestException(
+                    "L'ordonnance peut être validée pendant le rendez-vous confirmé ou après sa fin.");
+        }
         UUID doctorUserId = prescription.getAppointment().getDoctor().getUser().getId();
-        String digitalSignature = signatureService.sign(
-                prescription.getId(), doctorUserId, signedAt.toString(), contentSha256);
-        prescription.validateOn(
-                LocalDate.now(clock), doctorUserId, signedAt, contentSha256, digitalSignature);
-        addRevision(prescription, doctorUserId, "SIGNED");
+        prescription.validateOn(LocalDate.now(clock));
+        addRevision(prescription, doctorUserId, "VALIDATED");
+        return prescriptionMapper.toResponse(prescription);
+    }
+
+    @Transactional(readOnly = true)
+    public PrescriptionResponse resign(String doctorEmail, UUID prescriptionId) {
+        Prescription prescription = findDoctorPrescription(doctorEmail, prescriptionId);
+        if (prescription.getStatus() != PrescriptionStatus.VALIDATED) {
+            throw new InvalidRequestException("Seule une ordonnance validée peut être téléchargée.");
+        }
         return prescriptionMapper.toResponse(prescription);
     }
 
@@ -166,13 +175,7 @@ public class PrescriptionService {
     public Prescription findFinalForDoctor(String doctorEmail, UUID prescriptionId) {
         Prescription prescription = findDoctorPrescription(doctorEmail, prescriptionId);
         if (prescription.getStatus() != PrescriptionStatus.VALIDATED) {
-            throw new InvalidRequestException("Le PDF n'est disponible qu'après validation et signature.");
-        }
-        if (prescription.getSignedAt() == null
-                || prescription.getSignedByUserId() == null
-                || prescription.getContentSha256() == null
-                || prescription.getDigitalSignature() == null) {
-            throw new InvalidRequestException("Cette ordonnance historique ne possède pas de signature vérifiable.");
+            throw new InvalidRequestException("Le PDF n'est disponible qu'après validation de l'ordonnance.");
         }
         return prescription;
     }
@@ -182,23 +185,35 @@ public class PrescriptionService {
         Prescription prescription = prescriptionRepository.findByIdAndAppointmentPatientUserEmailIgnoreCaseAndStatus(
                         prescriptionId, patientEmail, PrescriptionStatus.VALIDATED)
                 .orElseThrow(() -> new NotFoundException("Ordonnance introuvable."));
-        if (prescription.getSignedAt() == null
-                || prescription.getSignedByUserId() == null
-                || prescription.getContentSha256() == null
-                || prescription.getDigitalSignature() == null) {
-            throw new NotFoundException("Ordonnance introuvable.");
-        }
         return prescription;
     }
 
     @Transactional(readOnly = true)
-    public List<PrescriptionResponse> findPatientPrescriptions(String patientEmail) {
+    public List<PatientPrescriptionResponse> findPatientPrescriptions(String patientEmail) {
         Patient patient = patientRepository.findByUserEmail(patientEmail)
                 .orElseThrow(() -> new NotFoundException("Profil patient introuvable."));
         return prescriptionRepository
                 .findAllByAppointmentPatientIdAndStatusOrderByAppointmentScheduledAtDesc(
                         patient.getId(), PrescriptionStatus.VALIDATED).stream()
-                .map(prescriptionMapper::toResponse)
+                .map(prescription -> {
+                    var appointment = prescription.getAppointment();
+                    var doctor = appointment.getDoctor();
+                    String doctorName = java.util.stream.Stream.of(doctor.getFirstName(), doctor.getLastName())
+                            .filter(StringUtils::hasText)
+                            .collect(java.util.stream.Collectors.joining(" "));
+                    if (!StringUtils.hasText(doctorName)) {
+                        doctorName = "Médecin";
+                    }
+                    return new PatientPrescriptionResponse(
+                            prescription.getId(),
+                            appointment.getId(),
+                            doctor.getId(),
+                            doctorName,
+                            doctor.getSpecialty(),
+                            prescription.getContent(),
+                            prescription.getDate(),
+                            appointment.getScheduledAt());
+                })
                 .toList();
     }
 
@@ -212,7 +227,7 @@ public class PrescriptionService {
     }
 
     private void addRevision(Prescription prescription, UUID actorUserId, String changeType) {
-        int revisionNumber = revisionRepository.countByPrescriptionId(prescription.getId()) + 1;
+        int revisionNumber = revisionRepository.findMaxRevisionNumber(prescription.getId()) + 1;
         revisionRepository.save(new PrescriptionRevision(
                 prescription,
                 revisionNumber,
@@ -222,12 +237,4 @@ public class PrescriptionService {
                 clock.instant()));
     }
 
-    private String sha256(String content) {
-        try {
-            return java.util.HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable.", exception);
-        }
-    }
 }

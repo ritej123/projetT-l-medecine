@@ -1,6 +1,7 @@
 package com.telemed.platform.auth.api;
 
 import com.telemed.platform.auth.service.AuthService;
+import com.telemed.platform.auth.service.CaptchaService;
 import com.telemed.platform.user.api.CreateDoctorRequest;
 import com.telemed.platform.user.service.AccountProvisioningService;
 import jakarta.validation.Valid;
@@ -16,15 +17,21 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final CaptchaService captchaService;
     private final AccountProvisioningService accountProvisioningService;
 
-    public AuthController(AuthService authService, AccountProvisioningService accountProvisioningService) {
+    public AuthController(
+            AuthService authService,
+            CaptchaService captchaService,
+            AccountProvisioningService accountProvisioningService) {
         this.authService = authService;
+        this.captchaService = captchaService;
         this.accountProvisioningService = accountProvisioningService;
     }
 
     @PostMapping("/login")
     public TokenResponse login(@Valid @RequestBody LoginRequest request) {
+        captchaService.verify(request.captchaId(), request.captchaText());
         return authService.login(request);
     }
 

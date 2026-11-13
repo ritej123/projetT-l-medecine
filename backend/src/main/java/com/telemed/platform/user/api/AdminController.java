@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import com.telemed.platform.appointment.domain.AppointmentStatus;
 import com.telemed.platform.doctor.domain.DoctorVerificationStatus;
+import com.telemed.platform.user.api.AdminDoctorDetailResponse;
 import com.telemed.platform.user.service.AdminDashboardService;
 import com.telemed.platform.user.service.AdminManagementService;
 import jakarta.validation.Valid;
@@ -83,6 +84,11 @@ public class AdminController {
         return AdminPageResponse.from(managementService.auditLogs(page, size));
     }
 
+    @GetMapping("/doctors/{doctorId}")
+    public AdminDoctorDetailResponse doctorDetail(@PathVariable UUID doctorId) {
+        return managementService.doctorDetail(doctorId);
+    }
+
     @PatchMapping("/doctors/{doctorId}/verify")
     public AdminDoctorResponse verifyDoctor(
             @PathVariable UUID doctorId, @AuthenticationPrincipal Jwt jwt) {
@@ -91,8 +97,10 @@ public class AdminController {
 
     @PatchMapping("/doctors/{doctorId}/reject")
     public AdminDoctorResponse rejectDoctor(
-            @PathVariable UUID doctorId, @AuthenticationPrincipal Jwt jwt) {
-        return managementService.rejectDoctor(doctorId, jwt.getClaimAsString("email"));
+            @PathVariable UUID doctorId,
+            @Valid @RequestBody RejectDoctorRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return managementService.rejectDoctor(doctorId, request.reason(), jwt.getClaimAsString("email"));
     }
 
     @PatchMapping("/doctors/{doctorId}/status")

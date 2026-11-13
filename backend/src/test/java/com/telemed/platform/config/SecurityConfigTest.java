@@ -31,7 +31,7 @@ class SecurityConfigTest {
 
     @Test
     void decoderRejectsRefreshTokensAsApiCredentials() {
-        var key = securityConfig.jwtSecretKey("a-long-test-secret-that-is-at-least-32-bytes");
+        var key = securityConfig.jwtSecretKey("l9ug8gIouYc5CCXM2XAG+yf6e75VnNytua7gA8Htg0o=");
         JwtEncoder encoder = securityConfig.jwtEncoder(key);
         UserRepository userRepository = mock(UserRepository.class);
         UUID accountId = UUID.randomUUID();

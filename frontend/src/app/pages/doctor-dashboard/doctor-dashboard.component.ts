@@ -1,5 +1,6 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
@@ -72,10 +73,20 @@ function isDoctorPage(value: unknown): value is DoctorPage {
             @if (loadingStats()) { <div class="empty"><span class="loader"></span><p>Chargement des statistiques…</p></div> }
             @else if (stats()?.nextAppointments?.length) {
               @for (appointment of stats()!.nextAppointments; track appointment.id) {
-                <button class="activity-row" type="button" (click)="openConsultation(appointment.id, appointment.patientId)">
+                <div class="activity-row">
                   <span class="activity-time">{{ appointmentDate(appointment.scheduledAt) | date:'EEE d MMM · HH:mm':'UTC':'fr' }}</span>
-                  <span>{{ appointment.patientEmail }}</span><span class="status" [class.done]="appointment.status === 'DONE'">{{ statusLabel(appointment.status) }}</span>
-                </button>
+                  <span>{{ appointment.patientEmail }}</span>
+                  <span class="status" [class.done]="appointment.status === 'DONE'">{{ statusLabel(appointment.status) }}</span>
+                  @if (appointment.consultationReason) { <small class="consultation-reason">Motif : {{ appointment.consultationReason }}</small> }
+                  @if (appointment.status === 'PENDING') {
+                    <button class="confirm" type="button" [disabled]="updatingAppointmentId() === appointment.id"
+                            (click)="setAppointmentStatus(appointment.id, 'CONFIRMED')">
+                      {{ updatingAppointmentId() === appointment.id ? 'Confirmation…' : 'Confirmer' }}
+                    </button>
+                  } @else if (appointment.status === 'CONFIRMED' || appointment.status === 'DONE') {
+                    <button class="text-action" type="button" (click)="openConsultation(appointment.id, appointment.patientId)">Dossier</button>
+                  }
+                </div>
               }
             } @else { <div class="empty small"><p>Aucun rendez-vous à venir.</p></div> }
           </article>
@@ -214,10 +225,23 @@ function isDoctorPage(value: unknown): value is DoctorPage {
                     <div class="visit-card">
                       <div class="visit-main"><div class="patient-avatar">{{ patientInitials(appointment.patientId) }}</div><div><h3>{{ patientLabel(appointment) }}</h3><p>Consultation médicale · {{ statusLabel(appointment.status) }}</p></div></div>
                       <div class="visit-actions">
-                        <button type="button" class="text-action" (click)="openConsultation(appointment.id, appointment.patientId)">Dossier et compte rendu</button>
-                        @if (appointment.status === 'PENDING') { <button type="button" class="confirm" (click)="setStatus(appointment, 'CONFIRMED')">Confirmer</button> }
+                        @if (appointment.status === 'CONFIRMED' || appointment.status === 'DONE') {
+                          <button type="button" class="text-action" (click)="openConsultation(appointment.id, appointment.patientId)">Dossier et compte rendu</button>
+                        }
+                        @if (appointment.status === 'PENDING') {
+                          <button type="button" class="confirm" [disabled]="updatingAppointmentId() === appointment.id"
+                                  (click)="setStatus(appointment, 'CONFIRMED')">
+                            {{ updatingAppointmentId() === appointment.id ? 'Confirmation…' : 'Confirmer' }}
+                          </button>
+                        }
                         @if (appointment.status === 'CONFIRMED') {
-                          <a class="video" [routerLink]="['/teleconsultation', appointment.id]"><span class="material-icons">videocam</span>Rejoindre</a>
+                          @if (canJoinTeleconsultation(appointment)) {
+                            <a class="video" [routerLink]="['/teleconsultation', appointment.id]"><span class="material-icons">videocam</span>Rejoindre</a>
+                          } @else if (!hasAppointmentEnded(appointment)) {
+                            <span class="video unavailable"><span class="material-icons">videocam</span>Salle vidéo à {{ appointmentDate(appointment.scheduledAt) | date:'HH:mm':'UTC' }}</span>
+                          } @else {
+                            <span class="video unavailable">Horaire terminé</span>
+                          }
                           <button type="button" class="complete" [disabled]="!isAppointmentStarted(appointment.scheduledAt)" (click)="setStatus(appointment, 'DONE')">Terminer</button>
                         }
                         @if (appointment.status === 'PENDING' || appointment.status === 'CONFIRMED') { <button type="button" class="text-action danger" (click)="cancelAppointment(appointment)">Annuler</button> }
@@ -286,7 +310,9 @@ function isDoctorPage(value: unknown): value is DoctorPage {
                 <label>Compte rendu<textarea name="consultationReport" rows="5" maxlength="20000" [(ngModel)]="consultationReport" [disabled]="consultationFinalized()"></textarea></label>
                 <label>Observations cliniques<textarea name="consultationObservations" rows="4" maxlength="20000" [(ngModel)]="consultationObservations" [disabled]="consultationFinalized()"></textarea></label>
                 <label>Diagnostic<textarea name="consultationDiagnosis" rows="3" maxlength="10000" [(ngModel)]="consultationDiagnosis" [disabled]="consultationFinalized()"></textarea></label>
-                <div class="form-actions"><button type="button" [disabled]="savingConsultation() || consultationFinalized()" (click)="saveConsultation(false)">Enregistrer le brouillon</button><button type="button" class="confirm" [disabled]="savingConsultation() || consultationFinalized() || !selectedAppointmentStarted()" (click)="saveConsultation(true)">Finaliser et terminer</button></div>
+                <div class="form-actions"><button type="button" [disabled]="savingConsultation() || consultationFinalized()" (click)="saveConsultation(false)">Enregistrer le brouillon</button><button type="button" class="confirm" [disabled]="savingConsultation() || consultationFinalized() || !selectedAppointmentStarted()" (click)="saveConsultation(true)">Finaliser et terminer</button>
+                  @if (canPrescribe()) { <button type="button" class="text-action" (click)="goToPrescription()">Rédiger l’ordonnance</button> }
+                </div>
               </div>
               @if (consultation()?.revisions?.length) {
                 <h4>Historique des modifications</h4>
@@ -298,19 +324,20 @@ function isDoctorPage(value: unknown): value is DoctorPage {
 
         <section id="ordonnances" class="patient-section" [hidden]="activePage() !== 'ordonnances'">
           <div class="section-heading"><div><span class="eyebrow">PRESCRIPTIONS</span><h2>Ordonnances</h2></div></div>
-          @if (!selectedAppointmentId()) { <div class="empty small"><p>Sélectionnez une consultation confirmée ou terminée pour rédiger une ordonnance. Aucun contenu médical n’est généré automatiquement.</p></div> }
+          @if (!selectedAppointmentId()) { <div class="empty small"><p>Sélectionnez une consultation en cours ou terminée pour rédiger une ordonnance. Aucun contenu médical n’est généré automatiquement.</p></div> }
           @else {
             <article class="detail-panel">
-              @if (!canPrescribe()) { <div class="notice">L’ordonnance ne peut être créée qu’après la consultation. Finalisez d’abord le rendez-vous.</div> }
+              @if (!canPrescribe()) { <div class="notice">Le brouillon d’ordonnance est disponible pendant le rendez-vous confirmé ou après sa fin. Vérifiez le statut et l’horaire du rendez-vous.</div> }
               @if (createdPrescription()) {
-                <div class="notice">Ordonnance existante · {{ createdPrescription()?.status === 'VALIDATED' ? 'validée et signée' : 'brouillon' }}</div>
+                <div class="notice">Ordonnance existante · {{ createdPrescription()?.status === 'VALIDATED' ? 'validée' : 'brouillon' }}</div>
+                @if (createdPrescription()?.status === 'DRAFT') { <div class="notice">Brouillon enregistré : il reste confidentiel et n’est pas visible par le patient avant validation.</div> }
                 @for (revision of prescriptionHistory(); track revision.id) { <div class="activity-row"><strong>{{ revision.changeType }}</strong><span>{{ revision.createdAt | date:'d MMM y · HH:mm':'Europe/Paris':'fr' }}</span><span>{{ revision.content }}</span></div> }
               }
-              <label>Contenu de l’ordonnance<textarea name="prescriptionContent" rows="5" maxlength="10000" [(ngModel)]="prescriptionContent" [disabled]="createdPrescription()?.status === 'VALIDATED' || !canPrescribe()"></textarea></label>
+              <label>Contenu de l’ordonnance<textarea name="prescriptionContent" rows="8" maxlength="10000" [(ngModel)]="prescriptionContent" [disabled]="createdPrescription()?.status === 'VALIDATED' || !canPrescribe()"></textarea></label>
               <div class="form-actions">
-                @if (!createdPrescription() && canPrescribe()) { <button type="button" [disabled]="!prescriptionContent.trim()" (click)="createPrescription()">Enregistrer le brouillon</button> }
-                @else if (createdPrescription()?.status === 'DRAFT') { <button type="button" (click)="updatePrescription()">Enregistrer les modifications</button><button type="button" (click)="validatePrescription()">Valider et signer</button> }
-                @else if (createdPrescription()?.status === 'VALIDATED') { <span class="status done">Ordonnance validée</span><button type="button" class="text-action" (click)="downloadPrescription()">Télécharger le PDF signé</button> }
+                @if (!createdPrescription() && canPrescribe()) { <button type="button" [disabled]="!prescriptionContent.trim() || savingPrescription()" (click)="createPrescription()">{{ savingPrescription() ? 'Enregistrement…' : 'Enregistrer le brouillon' }}</button> }
+                @else if (createdPrescription()?.status === 'DRAFT') { <button type="button" [disabled]="savingPrescription() || !canPrescribe()" (click)="updatePrescription()">{{ savingPrescription() ? 'Enregistrement…' : 'Enregistrer les modifications' }}</button><button type="button" [disabled]="savingPrescription() || !canPrescribe()" (click)="validatePrescription()">Valider l’ordonnance</button> }
+                @else if (createdPrescription()?.status === 'VALIDATED') { <span class="status done">Ordonnance validée</span><button type="button" class="text-action" (click)="downloadPrescription()">Télécharger le PDF</button> }
               </div>
               @if (createdPrescription()) { <p class="muted">Ordonnance {{ createdPrescription()?.id }} · {{ createdPrescription()?.status === 'VALIDATED' ? 'validée' : 'brouillon' }}</p> }
             </article>
@@ -332,9 +359,12 @@ function isDoctorPage(value: unknown): value is DoctorPage {
         <section id="profil" class="patient-section" [hidden]="activePage() !== 'profil'">
           <div class="section-heading"><div><span class="eyebrow">INFORMATIONS PROFESSIONNELLES</span><h2>Mon profil</h2></div></div>
           @if (profile()) {
-            <form class="profile-form" (ngSubmit)="saveProfile()">
-              <label>Prénom<input name="profileFirstName" maxlength="80" [(ngModel)]="profileForm.firstName"></label>
-              <label>Nom<input name="profileLastName" maxlength="80" [(ngModel)]="profileForm.lastName"></label>
+            <form class="profile-form" (ngSubmit)="saveProfile()" #profileFormElement="ngForm">
+              <label>Prénom<input name="profileFirstName" maxlength="80" [(ngModel)]="profileForm.firstName" required></label>
+              <label>Nom<input name="profileLastName" maxlength="80" [(ngModel)]="profileForm.lastName" required></label>
+              @if (!profileForm.firstName.trim() || !profileForm.lastName.trim()) {
+                <p class="profile-status">Renseignez votre prénom et votre nom pour apparaître correctement dans l’annuaire patient.</p>
+              }
               <label>E-mail professionnel<input [value]="profile()?.email" disabled></label>
               <label>Spécialité<input [value]="profile()?.specialty" disabled></label>
               <label>Photo (URL)<input name="profilePhoto" type="url" maxlength="2048" [(ngModel)]="profileForm.profilePhotoUrl"></label>
@@ -343,7 +373,7 @@ function isDoctorPage(value: unknown): value is DoctorPage {
               <label>Numéro professionnel<input name="professionalNumber" maxlength="40" [(ngModel)]="profileForm.professionalNumber"></label>
               <label class="checkbox-label"><input name="emailNotifications" type="checkbox" [(ngModel)]="profileForm.emailNotificationsEnabled"> Recevoir les notifications par e-mail</label>
               <div class="profile-status">Compte : <strong>{{ profile()?.verificationStatus }}</strong> · Numéro professionnel : <strong>{{ profile()?.professionalNumberVerified ? 'vérifié' : 'non vérifié' }}</strong></div>
-              <button type="submit" [disabled]="savingProfile()">Enregistrer le profil</button>
+              <button type="submit" [disabled]="savingProfile() || profileFormElement.invalid">Enregistrer le profil</button>
             </form>
           } @else { <div class="empty small"><p>Profil en cours de chargement…</p></div> }
         </section>
@@ -363,13 +393,13 @@ function isDoctorPage(value: unknown): value is DoctorPage {
     .empty { display:grid; min-height:155px; justify-items:center; align-content:center; color:#869497; text-align:center; }.empty p { font-size:11px; }.empty h3 { margin:8px 0 0; color:#4a676c; font-size:13px; }.empty-icon { color:#55a08f; font-size:27px; }.loader { width:18px; height:18px; border:2px solid #d5e9e3; border-top-color:#087e75; border-radius:50%; animation:spin .7s linear infinite; }.notice { border-radius:10px; padding:12px; background:#fff1ee; color:#9a463e; font-size:12px; }
     .availability-section { margin-top:28px; }.availability-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:9px; margin:15px 0; }.availability-form label { display:grid; }.availability-list { display:grid; gap:7px; }.availability-item { display:flex; gap:12px; padding:10px; }
     .count { color:#89989a; font-size:10px; }.patient-table { display:grid; gap:7px; }.patient-row { display:flex; align-items:center; gap:11px; border:1px solid #e7eeec; border-radius:12px; padding:11px 13px; background:white; }.patient-data { display:grid; flex:1; gap:4px; }.patient-data strong { color:#38575e; font-size:11px; }.patient-data small { color:#88979a; font-size:9px; }.status { border-radius:20px; padding:6px 9px; background:#fff3dc; color:#a37a30; font-size:9px; font-weight:700; }.status.done { background:#e5f5ed; color:#287d5c; }.empty.small { min-height:75px; border:1px dashed #d9e5e2; border-radius:12px; background:white; }.empty.small p { margin:0; }footer { margin-top:35px; border-top:1px solid #e7edeb; padding:17px 0; color:#99a4a5; font-size:10px; }
-    .overview-panels { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:17px; }.overview-panel,.detail-panel { border:1px solid #e6edeb; border-radius:15px; padding:16px; background:white; }.activity-row { display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid #edf2f0; padding:10px 2px; color:#52696d; font-size:10px; }.activity-row:last-child { border-bottom:0; }.activity-time { color:#148174; font-weight:700; white-space:nowrap; }.activity-row button { text-align:left; }.agenda-controls { display:flex; align-items:center; gap:9px; }.view-switch { display:flex; padding:3px; border:1px solid #e1eae7; border-radius:9px; background:white; }.view-switch button { border:0; border-radius:7px; padding:7px 9px; background:transparent; color:#60777a; font:inherit; font-size:10px; cursor:pointer; }.view-switch button.chosen { background:#eaf5f1; color:#087e75; font-weight:700; }.agenda-controls .today-button { white-space:nowrap; }.status-filter { display:flex; align-items:center; gap:8px; margin:0 0 10px auto; color:#718287; font-size:10px; }.month-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:1px; padding:8px; background:#f0f4f2; }.month-day { display:flex; min-height:74px; flex-direction:column; align-items:flex-start; gap:7px; border:0; padding:8px; background:#fff; color:#34525a; text-align:left; cursor:pointer; }.month-day small { color:#148174; font-size:9px; }.month-day.outside-month { color:#bdc7c5; }.month-day.selected { outline:2px solid #148174; outline-offset:-2px; }.availability-calendar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; margin-top:10px; }.availability-day { display:grid; align-content:start; gap:6px; min-height:68px; border-radius:10px; padding:9px; background:#fff; box-shadow:0 0 0 1px #e7eeec; color:#52696d; font-size:9px; }.availability-day strong { color:#168176; }.availability-day small { color:#9aa7a8; }.availability-form label,.profile-form label,.consultation-form label,.detail-panel label { display:grid; gap:6px; color:#64797d; font-size:10px; }.availability-form input,.availability-form select,.profile-form input,.consultation-form textarea,.detail-panel textarea,.patient-search input,.status-filter select { min-width:0; border:1px solid #dce7e4; border-radius:8px; padding:9px; background:#fff; color:#29484f; font:inherit; font-size:11px; }.availability-form button,.profile-form button,.patient-search button,.form-actions button,.pagination button { align-self:end; border:0; border-radius:8px; padding:10px 12px; background:#087e75; color:white; font:inherit; font-size:10px; font-weight:700; cursor:pointer; }.availability-form button:disabled,.profile-form button:disabled,.form-actions button:disabled,.pagination button:disabled { opacity:.55; cursor:not-allowed; }.availability-item { align-items:center; flex-wrap:wrap; border:1px solid #e7eeec; border-radius:10px; background:white; color:#52696d; font-size:10px; }.text-action,.secondary-action,.close-detail { border:0; padding:5px; background:transparent; color:#087e75; font:inherit; font-size:10px; cursor:pointer; }.text-action.danger { color:#a24b43; }.exception-heading { margin-top:27px; }.exception-list { margin-top:10px; }.patient-search { display:flex; gap:8px; margin-bottom:12px; }.patient-search input { flex:1; }.patient-row-button { width:100%; text-align:left; cursor:pointer; }.pagination,.form-actions { display:flex; align-items:center; justify-content:flex-end; gap:9px; margin-top:13px; color:#718287; font-size:10px; }.detail-panel { position:relative; margin-top:12px; }.detail-panel h3 { margin:9px 0; color:#23434c; }.detail-panel h4 { margin:17px 0 7px; color:#426168; font-size:11px; }.close-detail { position:absolute; top:13px; right:13px; }.medical-record { white-space:pre-wrap; color:#52696d; font-size:11px; line-height:1.7; }.consultation-form { display:grid; gap:11px; }.consultation-form textarea,.detail-panel textarea { width:100%; resize:vertical; box-sizing:border-box; }.form-actions { justify-content:flex-start; }.notification-row { display:flex; align-items:center; justify-content:space-between; gap:14px; border:1px solid #e7eeec; border-radius:11px; margin-bottom:8px; padding:12px; background:white; }.notification-row.unread { border-left:3px solid #148174; }.notification-row>div { display:grid; gap:5px; color:#49636a; font-size:11px; }.notification-row small,.muted { color:#849397; font-size:9px; }.profile-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; border:1px solid #e6edeb; border-radius:15px; padding:17px; background:#fff; }.profile-form .checkbox-label { display:flex; align-items:center; gap:8px; }.profile-status { align-self:center; color:#718287; font-size:10px; }.profile-status strong { color:#168176; }
+    .overview-panels { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:17px; }.overview-panel,.detail-panel { border:1px solid #e6edeb; border-radius:15px; padding:16px; background:white; }.activity-row { display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid #edf2f0; padding:10px 2px; color:#52696d; font-size:10px; }.activity-row:last-child { border-bottom:0; }.activity-time { color:#148174; font-weight:700; white-space:nowrap; }.consultation-reason { flex-basis:100%; color:#708488; font-size:10px; }.activity-row button { text-align:left; }.agenda-controls { display:flex; align-items:center; gap:9px; }.view-switch { display:flex; padding:3px; border:1px solid #e1eae7; border-radius:9px; background:white; }.view-switch button { border:0; border-radius:7px; padding:7px 9px; background:transparent; color:#60777a; font:inherit; font-size:10px; cursor:pointer; }.view-switch button.chosen { background:#eaf5f1; color:#087e75; font-weight:700; }.agenda-controls .today-button { white-space:nowrap; }.status-filter { display:flex; align-items:center; gap:8px; margin:0 0 10px auto; color:#718287; font-size:10px; }.month-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:1px; padding:8px; background:#f0f4f2; }.month-day { display:flex; min-height:74px; flex-direction:column; align-items:flex-start; gap:7px; border:0; padding:8px; background:#fff; color:#34525a; text-align:left; cursor:pointer; }.month-day small { color:#148174; font-size:9px; }.month-day.outside-month { color:#bdc7c5; }.month-day.selected { outline:2px solid #148174; outline-offset:-2px; }.availability-calendar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:7px; margin-top:10px; }.availability-day { display:grid; align-content:start; gap:6px; min-height:68px; border-radius:10px; padding:9px; background:#fff; box-shadow:0 0 0 1px #e7eeec; color:#52696d; font-size:9px; }.availability-day strong { color:#168176; }.availability-day small { color:#9aa7a8; }.availability-form label,.profile-form label,.consultation-form label,.detail-panel label { display:grid; gap:6px; color:#64797d; font-size:10px; }.availability-form input,.availability-form select,.profile-form input,.consultation-form textarea,.detail-panel textarea,.patient-search input,.status-filter select { min-width:0; border:1px solid #dce7e4; border-radius:8px; padding:9px; background:#fff; color:#29484f; font:inherit; font-size:11px; }.availability-form button,.profile-form button,.patient-search button,.form-actions button,.pagination button { align-self:end; border:0; border-radius:8px; padding:10px 12px; background:#087e75; color:white; font:inherit; font-size:10px; font-weight:700; cursor:pointer; }.availability-form button:disabled,.profile-form button:disabled,.form-actions button:disabled,.pagination button:disabled { opacity:.55; cursor:not-allowed; }.availability-item { align-items:center; flex-wrap:wrap; border:1px solid #e7eeec; border-radius:10px; background:white; color:#52696d; font-size:10px; }.text-action,.secondary-action,.close-detail { border:0; padding:5px; background:transparent; color:#087e75; font:inherit; font-size:10px; cursor:pointer; }.text-action.danger { color:#a24b43; }.exception-heading { margin-top:27px; }.exception-list { margin-top:10px; }.patient-search { display:flex; gap:8px; margin-bottom:12px; }.patient-search input { flex:1; }.patient-row-button { width:100%; text-align:left; cursor:pointer; }.pagination,.form-actions { display:flex; align-items:center; justify-content:flex-end; gap:9px; margin-top:13px; color:#718287; font-size:10px; }.detail-panel { position:relative; margin-top:12px; }.detail-panel h3 { margin:9px 0; color:#23434c; }.detail-panel h4 { margin:17px 0 7px; color:#426168; font-size:11px; }.close-detail { position:absolute; top:13px; right:13px; }.medical-record { white-space:pre-wrap; color:#52696d; font-size:11px; line-height:1.7; }.consultation-form { display:grid; gap:11px; }.consultation-form textarea,.detail-panel textarea { width:100%; resize:vertical; box-sizing:border-box; }.form-actions { justify-content:flex-start; }.notification-row { display:flex; align-items:center; justify-content:space-between; gap:14px; border:1px solid #e7eeec; border-radius:11px; margin-bottom:8px; padding:12px; background:white; }.notification-row.unread { border-left:3px solid #148174; }.notification-row>div { display:grid; gap:5px; color:#49636a; font-size:11px; }.notification-row small,.muted { color:#849397; font-size:9px; }.profile-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; border:1px solid #e6edeb; border-radius:15px; padding:17px; background:#fff; }.profile-form .checkbox-label { display:flex; align-items:center; gap:8px; }.profile-status { align-self:center; color:#718287; font-size:10px; }.profile-status strong { color:#168176; }
     @keyframes spin { to { transform:rotate(360deg); } }
     @media(max-width:900px) { .content { padding:0 20px 25px; } }
     @media(max-width:680px) { .content { padding:0 13px 20px; }.topbar { height:55px; }.user-pill { font-size:0; }.welcome { align-items:flex-start; flex-direction:column; margin:23px 0 17px; }h1 { font-size:25px; }.summary-grid { grid-template-columns:1fr; gap:8px; }.summary-card { display:grid; min-height:72px; grid-template-columns:40px 1fr auto; align-items:center; column-gap:9px; }.summary-icon { grid-row:span 2; }.summary-card p { margin:0; }.summary-card strong { grid-column:3; grid-row:1; }.summary-card small { grid-column:2/4; }.section-heading { align-items:flex-start; flex-direction:column; }.agenda-controls { width:100%; flex-wrap:wrap; }.week-nav { width:100%; justify-content:space-between; }.week-grid { gap:1px; padding:7px; }.day { min-height:58px; }.day>span { font-size:8px; }.visit-card { align-items:flex-start; flex-direction:column; }.visit-actions { width:100%; justify-content:flex-start; }.schedule { padding:3px 8px 14px; }.schedule-item { grid-template-columns:43px 8px 1fr; gap:6px; }.time { font-size:11px; }.patient-row { padding:9px; }.status { padding:5px 7px; }.overview-panels,.profile-form { grid-template-columns:1fr; }.month-day { min-height:50px; padding:5px; }.availability-calendar { grid-template-columns:repeat(2,minmax(0,1fr)); }.activity-row,.notification-row { align-items:flex-start; flex-wrap:wrap; }.availability-item { gap:7px; }.profile-status { line-height:1.6; } }
   `]
 })
-export class DoctorDashboardComponent implements OnInit {
+export class DoctorDashboardComponent implements OnInit, OnDestroy {
   readonly appointments = signal<Appointment[]>([]);
   readonly activePage = signal<DoctorPage>('dashboard');
   readonly availabilities = signal<DoctorAvailability[]>([]);
@@ -378,6 +408,7 @@ export class DoctorDashboardComponent implements OnInit {
   readonly savingAvailability = signal(false);
   readonly savingReschedule = signal(false);
   readonly reschedulingAppointmentId = signal('');
+  readonly updatingAppointmentId = signal('');
   readonly stats = signal<DoctorDashboardStats | null>(null);
   readonly loadingStats = signal(true);
   readonly agendaView = signal<'day' | 'week' | 'month'>('week');
@@ -394,6 +425,9 @@ export class DoctorDashboardComponent implements OnInit {
   readonly consultation = signal<DoctorConsultation | null>(null);
   readonly consultationFinalized = signal(false);
   readonly savingConsultation = signal(false);
+  readonly savingPrescription = signal(false);
+  private readonly currentTime = signal(Date.now());
+  private clockInterval?: ReturnType<typeof setInterval>;
   readonly createdPrescription = signal<Prescription | null>(null);
   readonly prescriptionHistory = signal<PrescriptionRevision[]>([]);
   readonly selectedAppointmentStatus = signal<Appointment['status'] | null>(null);
@@ -468,6 +502,7 @@ export class DoctorDashboardComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.clockInterval = setInterval(() => this.currentTime.set(Date.now()), 30_000);
     this.route.data.subscribe(data => {
       const page = data['doctorPage'];
       this.activePage.set(isDoctorPage(page) ? page : 'dashboard');
@@ -484,7 +519,15 @@ export class DoctorDashboardComponent implements OnInit {
         this.appointments.set(appointments);
         this.loading.set(false);
         const selectedAppointment = appointments.find(item => item.id === this.selectedAppointmentId());
-        if (selectedAppointment) this.selectedAppointmentStatus.set(selectedAppointment.status);
+        if (selectedAppointment) {
+          this.selectedAppointmentStatus.set(selectedAppointment.status);
+        } else if ((this.activePage() === 'consultations' || this.activePage() === 'ordonnances')
+            && appointments.some(item => item.status === 'CONFIRMED' || item.status === 'DONE')) {
+          const defaultAppointment = [...appointments]
+            .filter(item => item.status === 'CONFIRMED' || item.status === 'DONE')
+            .sort((left, right) => right.scheduledAt.localeCompare(left.scheduledAt))[0];
+          this.loadConsultation(defaultAppointment.id, defaultAppointment.patientId);
+        }
       },
       error: () => { this.loading.set(false); this.error.set('Impossible de charger votre agenda pour le moment.'); }
     });
@@ -515,6 +558,10 @@ export class DoctorDashboardComponent implements OnInit {
       error: () => this.error.set('Impossible de charger vos congés et indisponibilités.')
     });
     this.exceptionDate = from;
+  }
+
+  ngOnDestroy(): void {
+    if (this.clockInterval) clearInterval(this.clockInterval);
   }
 
   appointmentsOn(dayKey: string): Appointment[] {
@@ -572,7 +619,11 @@ export class DoctorDashboardComponent implements OnInit {
       ?? this.stats()?.recentActivities.find(item => item.id === appointmentId)?.patientId
       ?? '';
   }
-  canPrescribe(): boolean { return this.selectedAppointmentStatus() === 'DONE'; }
+  canPrescribe(): boolean {
+    const status = this.selectedAppointmentStatus();
+    return status === 'DONE'
+      || (status === 'CONFIRMED' && this.selectedAppointmentStarted() && this.selectedAppointmentNotEnded());
+  }
   isAppointmentStarted(scheduledAt: string): boolean {
     return this.appointmentDate(scheduledAt).getTime() <= this.appointmentLocalNowAsUtc();
   }
@@ -584,19 +635,55 @@ export class DoctorDashboardComponent implements OnInit {
     return scheduledAt ? this.isAppointmentStarted(scheduledAt) : false;
   }
 
+  canJoinTeleconsultation(appointment: Appointment): boolean {
+    const startsAt = this.appointmentDate(appointment.scheduledAt).getTime();
+    const now = this.appointmentLocalNowAsUtc();
+    return appointment.status === 'CONFIRMED'
+      && startsAt <= now
+      && now < startsAt + appointment.durationMinutes * 60_000;
+  }
+
+  hasAppointmentEnded(appointment: Appointment): boolean {
+    return this.appointmentDate(appointment.scheduledAt).getTime()
+      + appointment.durationMinutes * 60_000 <= this.appointmentLocalNowAsUtc();
+  }
+
+  private selectedAppointmentNotEnded(): boolean {
+    const appointment = this.appointments().find(item => item.id === this.selectedAppointmentId());
+    const scheduledAt = appointment?.scheduledAt
+      ?? this.stats()?.nextAppointments.find(item => item.id === this.selectedAppointmentId())?.scheduledAt
+      ?? this.stats()?.recentActivities.find(item => item.id === this.selectedAppointmentId())?.scheduledAt;
+    if (!scheduledAt) return false;
+    const duration = appointment?.durationMinutes
+      ?? this.stats()?.nextAppointments.find(item => item.id === this.selectedAppointmentId())?.durationMinutes
+      ?? this.stats()?.recentActivities.find(item => item.id === this.selectedAppointmentId())?.durationMinutes;
+    return duration !== undefined
+      && this.appointmentDate(scheduledAt).getTime() + duration * 60_000 > this.appointmentLocalNowAsUtc();
+  }
+
   statusLabel(status: Appointment['status']): string {
     return status === 'CONFIRMED' ? 'Confirmé' : status === 'PENDING' ? 'En attente'
       : status === 'DONE' ? 'Terminé' : 'Annulé';
   }
 
   setStatus(appointment: Appointment, status: 'CONFIRMED' | 'DONE' | 'CANCELLED'): void {
-    this.api.updateAppointmentStatus(appointment.id, status).subscribe({
+    this.setAppointmentStatus(appointment.id, status);
+  }
+
+  setAppointmentStatus(appointmentId: string, status: 'CONFIRMED' | 'DONE' | 'CANCELLED'): void {
+    this.error.set('');
+    this.updatingAppointmentId.set(appointmentId);
+    this.api.updateAppointmentStatus(appointmentId, status).subscribe({
       next: updated => {
         this.appointments.update(items => items.map(item => item.id === updated.id ? updated : item));
+        this.updatingAppointmentId.set('');
         this.refreshStats();
         this.loadNotifications();
       },
-      error: () => this.error.set('La mise à jour du rendez-vous a échoué.')
+      error: () => {
+        this.updatingAppointmentId.set('');
+        this.error.set('La mise à jour du rendez-vous a échoué. Vérifiez que ce rendez-vous vous est attribué et qu’il est toujours en attente.');
+      }
     });
   }
 
@@ -765,6 +852,17 @@ export class DoctorDashboardComponent implements OnInit {
     });
   }
 
+  goToPrescription(): void {
+    const appointmentId = this.selectedAppointmentId();
+    if (!appointmentId || !this.canPrescribe()) return;
+    void this.router.navigate(['/medecin/ordonnances'], {
+      queryParams: {
+        appointmentId,
+        patientId: this.selectedPatientId() || this.patientIdForAppointment(appointmentId) || null
+      }
+    });
+  }
+
   private loadConsultation(appointmentId: string, patientId: string): void {
     if (!patientId) patientId = this.patientIdForAppointment(appointmentId);
     const appointment = this.appointments().find(item => item.id === appointmentId);
@@ -785,6 +883,7 @@ export class DoctorDashboardComponent implements OnInit {
     if (patientId) this.openPatient(patientId);
     this.api.doctorConsultation(appointmentId).subscribe({
       next: consultation => {
+        if (!consultation) return;
         this.consultation.set(consultation);
         this.consultationReport = consultation.report ?? '';
         this.consultationObservations = consultation.observations ?? '';
@@ -797,6 +896,7 @@ export class DoctorDashboardComponent implements OnInit {
     });
     this.api.doctorPrescription(appointmentId).subscribe({
       next: prescription => {
+        if (!prescription) return;
         this.createdPrescription.set(prescription);
         this.prescriptionContent = prescription.content;
         this.api.doctorPrescriptionHistory(prescription.id).subscribe({
@@ -854,38 +954,64 @@ export class DoctorDashboardComponent implements OnInit {
   }
 
   createPrescription(): void {
-    if (!this.selectedAppointmentId() || !this.prescriptionContent.trim()) return;
+    if (!this.selectedAppointmentId() || !this.canPrescribe() || !this.prescriptionContent.trim()) return;
+    this.savingPrescription.set(true);
+    this.error.set('');
     this.api.createDoctorPrescription(this.selectedAppointmentId(), this.prescriptionContent.trim()).subscribe({
       next: prescription => {
         this.createdPrescription.set(prescription);
+        this.savingPrescription.set(false);
         this.loadPrescriptionHistory(prescription.id);
       },
-      error: () => this.error.set('Impossible d’enregistrer le brouillon d’ordonnance.')
+      error: error => {
+        this.savingPrescription.set(false);
+        this.error.set(error.status === 409
+          ? 'Une ordonnance existe déjà pour ce rendez-vous. Rechargez la consultation pour la retrouver.'
+          : error.status === 400
+            ? 'Le brouillon ne peut être créé que pendant un rendez-vous confirmé en cours ou après sa fin.'
+            : 'Impossible d’enregistrer le brouillon d’ordonnance.');
+      }
     });
   }
 
   updatePrescription(): void {
     const prescription = this.createdPrescription();
-    if (!prescription || prescription.status !== 'DRAFT' || !this.prescriptionContent.trim()) return;
+    if (!prescription || prescription.status !== 'DRAFT' || !this.canPrescribe() || !this.prescriptionContent.trim()) return;
+    this.savingPrescription.set(true);
+    this.error.set('');
     this.api.updateDoctorPrescription(prescription.id, this.prescriptionContent.trim()).subscribe({
       next: updated => {
         this.createdPrescription.set(updated);
+        this.savingPrescription.set(false);
         this.loadPrescriptionHistory(updated.id);
       },
-      error: () => this.error.set('Impossible de modifier ce brouillon.')
+      error: error => {
+        this.savingPrescription.set(false);
+        this.error.set(error.status === 400
+          ? 'Le brouillon ne peut plus être modifié dans l’état actuel du rendez-vous.'
+          : 'Impossible de modifier ce brouillon.');
+      }
     });
   }
 
   validatePrescription(): void {
     const prescription = this.createdPrescription();
-    if (!prescription) return;
-    if (!window.confirm('Valider et signer cette ordonnance ? Cette action est sensible.')) return;
+    if (!prescription || !this.canPrescribe()) return;
+    if (!window.confirm('Valider cette ordonnance et la rendre disponible au patient ?')) return;
+    this.savingPrescription.set(true);
+    this.error.set('');
     this.api.validateDoctorPrescription(prescription.id).subscribe({
       next: validated => {
         this.createdPrescription.set(validated);
+        this.savingPrescription.set(false);
         this.loadPrescriptionHistory(validated.id);
       },
-      error: () => this.error.set('Impossible de valider cette ordonnance.')
+      error: error => {
+        this.savingPrescription.set(false);
+        this.error.set(error.status === 400
+          ? 'Cette ordonnance ne peut être validée que pendant un rendez-vous confirmé en cours ou après sa fin.'
+          : 'Impossible de valider cette ordonnance.');
+      }
     });
   }
 
@@ -905,10 +1031,12 @@ export class DoctorDashboardComponent implements OnInit {
         const link = document.createElement('a');
         link.href = url;
         link.download = `ordonnance-${prescription.id}.pdf`;
+        document.body.appendChild(link);
         link.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(link);
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       },
-      error: () => this.error.set('Impossible de télécharger l’ordonnance signée.')
+      error: () => this.error.set('Impossible de télécharger le PDF de cette ordonnance.')
     });
   }
 
@@ -927,10 +1055,16 @@ export class DoctorDashboardComponent implements OnInit {
   }
 
   saveProfile(): void {
+    const firstName = this.profileForm.firstName.trim();
+    const lastName = this.profileForm.lastName.trim();
+    if (!firstName || !lastName) {
+      this.error.set('Renseignez votre prénom et votre nom pour enregistrer votre profil.');
+      return;
+    }
     this.savingProfile.set(true);
     this.api.updateDoctorProfile({
-      firstName: this.profileForm.firstName.trim() || null,
-      lastName: this.profileForm.lastName.trim() || null,
+      firstName,
+      lastName,
       profilePhotoUrl: this.profileForm.profilePhotoUrl.trim() || null,
       professionalPhone: this.profileForm.professionalPhone.trim() || null,
       officeAddress: this.profileForm.officeAddress.trim() || null,
@@ -1024,7 +1158,7 @@ export class DoctorDashboardComponent implements OnInit {
       minute: '2-digit',
       second: '2-digit',
       hourCycle: 'h23'
-    }).formatToParts(new Date());
+    }).formatToParts(new Date(this.currentTime()));
     const values = Object.fromEntries(parts.filter(part => part.type !== 'literal')
       .map(part => [part.type, Number(part.value)]));
     return Date.UTC(values['year'], values['month'] - 1, values['day'],

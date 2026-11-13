@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import com.telemed.platform.consultation.service.ConsultationService;
 import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -26,9 +27,11 @@ public class DoctorConsultationController {
     }
 
     @GetMapping
-    public ConsultationResponse findMine(
+    public ResponseEntity<ConsultationResponse> findMine(
             @AuthenticationPrincipal Jwt jwt, @PathVariable UUID appointmentId) {
-        return consultationService.findMine(jwt.getClaimAsString("email"), appointmentId);
+        return consultationService.findMine(jwt.getClaimAsString("email"), appointmentId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.<ConsultationResponse>noContent().build());
     }
 
     @PutMapping

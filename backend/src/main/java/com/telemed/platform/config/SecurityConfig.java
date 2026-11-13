@@ -56,6 +56,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/health", "/ws", "/ws/**").permitAll()
+                        .requestMatchers("/api/captcha").permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/register",

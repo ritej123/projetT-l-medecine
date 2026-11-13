@@ -19,6 +19,7 @@ import com.telemed.platform.doctor.domain.Doctor;
 import com.telemed.platform.doctor.domain.DoctorVerificationStatus;
 import com.telemed.platform.doctor.repository.DoctorRepository;
 import com.telemed.platform.patient.repository.PatientRepository;
+import com.telemed.platform.notification.service.DoctorStatusNotificationService;
 import com.telemed.platform.user.domain.AdminAuditLog;
 import com.telemed.platform.user.domain.Role;
 import com.telemed.platform.user.domain.User;
@@ -49,6 +50,9 @@ class AdminManagementServiceTest {
     @Mock
     private AdminAuditLogRepository auditLogRepository;
 
+    @Mock
+    private DoctorStatusNotificationService notificationService;
+
     private AdminManagementService service;
 
     @BeforeEach
@@ -59,7 +63,8 @@ class AdminManagementServiceTest {
                 appointmentRepository,
                 userRepository,
                 auditLogRepository,
-                ZoneId.of("Europe/Paris"));
+                ZoneId.of("Europe/Paris"),
+                notificationService);
     }
 
     @Test

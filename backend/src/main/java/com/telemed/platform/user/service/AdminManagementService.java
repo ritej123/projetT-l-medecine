@@ -17,6 +17,8 @@ import com.telemed.platform.doctor.domain.DoctorVerificationStatus;
 import com.telemed.platform.doctor.repository.DoctorRepository;
 import com.telemed.platform.patient.domain.Patient;
 import com.telemed.platform.patient.repository.PatientRepository;
+import com.telemed.platform.notification.service.DoctorStatusNotificationService;
+import com.telemed.platform.user.api.AdminDoctorDetailResponse;
 import com.telemed.platform.user.api.AdminDoctorResponse;
 import com.telemed.platform.user.api.AdminAuditLogResponse;
 import com.telemed.platform.user.api.AdminPatientResponse;
@@ -53,6 +55,7 @@ public class AdminManagementService {
     private final UserRepository userRepository;
     private final AdminAuditLogRepository auditLogRepository;
     private final ZoneId appointmentZone;
+    private final DoctorStatusNotificationService doctorStatusNotificationService;
 
     public AdminManagementService(
             DoctorRepository doctorRepository,
@@ -60,13 +63,15 @@ public class AdminManagementService {
             AppointmentRepository appointmentRepository,
             UserRepository userRepository,
             AdminAuditLogRepository auditLogRepository,
-            ZoneId appointmentZone) {
+            ZoneId appointmentZone,
+            DoctorStatusNotificationService doctorStatusNotificationService) {
         this.doctorRepository = doctorRepository;
         this.patientRepository = patientRepository;
         this.appointmentRepository = appointmentRepository;
         this.userRepository = userRepository;
         this.auditLogRepository = auditLogRepository;
         this.appointmentZone = appointmentZone;
+        this.doctorStatusNotificationService = doctorStatusNotificationService;
     }
 
     @Transactional(readOnly = true)
@@ -123,6 +128,17 @@ public class AdminManagementService {
     }
 
     @Transactional(readOnly = true)
+    public java.util.List<com.telemed.platform.doctor.api.DoctorRegistrationResponse> findPendingDoctorApplications() {
+        return doctorRepository.findAllByVerificationStatusOrderByUserCreatedAtAsc(DoctorVerificationStatus.PENDING).stream()
+                .map(doctor -> new com.telemed.platform.doctor.api.DoctorRegistrationResponse(
+                        doctor.getId(),
+                        doctor.getUser().getEmail(),
+                        doctor.getSpecialty(),
+                        doctor.getBio()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public Page<AdminAuditLogResponse> auditLogs(int page, int size) {
         return userRepository.findAdminAuditLogs(pageRequest(page, size, "createdAt"));
     }
@@ -138,11 +154,12 @@ public class AdminManagementService {
         doctor.setVerificationStatus(DoctorVerificationStatus.VERIFIED);
         doctor.getUser().enable();
         record(actor, "DOCTOR_VERIFY", "DOCTOR", doctorId, AdminAuditResult.SUCCESS);
+        doctorStatusNotificationService.enqueueApproved(doctor);
         return toDoctorResponse(doctor);
     }
 
     @Transactional
-    public AdminDoctorResponse rejectDoctor(UUID doctorId, String actorEmail) {
+    public AdminDoctorResponse rejectDoctor(UUID doctorId, String reason, String actorEmail) {
         User actor = requireAdmin(actorEmail);
         Doctor doctor = doctorRepository.findById(doctorId)
                 .orElseThrow(() -> new NotFoundException("Médecin introuvable."));
@@ -152,6 +169,7 @@ public class AdminManagementService {
         doctor.setVerificationStatus(DoctorVerificationStatus.REJECTED);
         doctor.getUser().disable();
         record(actor, "DOCTOR_REJECT", "DOCTOR", doctorId, AdminAuditResult.SUCCESS);
+        doctorStatusNotificationService.enqueueRejected(doctor, reason);
         return toDoctorResponse(doctor);
     }
 
@@ -176,6 +194,11 @@ public class AdminManagementService {
         }
         doctor.getUser().setEnabled(enabled);
         record(actor, enabled ? "DOCTOR_REACTIVATE" : "DOCTOR_SUSPEND", "DOCTOR", doctorId, AdminAuditResult.SUCCESS);
+        if (enabled) {
+            doctorStatusNotificationService.enqueueReactivated(doctor);
+        } else {
+            doctorStatusNotificationService.enqueueSuspended(doctor);
+        }
         return toDoctorResponse(doctor);
     }
 
@@ -190,6 +213,30 @@ public class AdminManagementService {
 
     private void record(User actor, String action, String targetType, UUID targetId, AdminAuditResult result) {
         auditLogRepository.save(new AdminAuditLog(actor, action, targetType, targetId, result));
+    }
+
+    @Transactional(readOnly = true)
+    public AdminDoctorDetailResponse doctorDetail(UUID doctorId) {
+        Doctor doctor = doctorRepository.findByIdWithUser(doctorId)
+                .orElseThrow(() -> new NotFoundException("Médecin introuvable."));
+        User user = doctor.getUser();
+        return new AdminDoctorDetailResponse(
+                doctor.getId(),
+                user.getEmail(),
+                doctor.getSpecialty(),
+                doctor.getBio(),
+                doctor.getFirstName(),
+                doctor.getLastName(),
+                doctor.getProfessionalPhone(),
+                doctor.getOfficeAddress(),
+                doctor.getOfficeCity(),
+                doctor.getProfessionalNumber(),
+                doctor.isProfessionalNumberVerified(),
+                doctor.getDocumentUrl(),
+                doctor.getDocumentUploadedAt(),
+                doctor.getVerificationStatus(),
+                user.isEnabled(),
+                user.getCreatedAt());
     }
 
     private AdminDoctorResponse toDoctorResponse(Doctor doctor) {

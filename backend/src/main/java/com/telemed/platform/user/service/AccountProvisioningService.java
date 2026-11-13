@@ -55,7 +55,9 @@ public class AccountProvisioningService {
     @Transactional
     public DoctorResponse createDoctor(CreateDoctorRequest request) {
         User user = createUser(request.email(), request.password(), Role.DOCTOR);
-        Doctor doctor = doctorRepository.save(new Doctor(user, request.specialty().trim(), request.bio()));
+        Doctor doctor = new Doctor(user, request.specialty().trim(), request.bio());
+        applyProfile(doctor, request);
+        doctor = doctorRepository.save(doctor);
         return doctorMapper.toResponse(doctor);
     }
 
@@ -78,6 +80,7 @@ public class AccountProvisioningService {
         user.disable();
         Doctor doctor = new Doctor(user, request.specialty().trim(), request.bio());
         doctor.setVerificationStatus(com.telemed.platform.doctor.domain.DoctorVerificationStatus.PENDING);
+        applyProfile(doctor, request);
         doctorRepository.save(doctor);
     }
 
@@ -116,5 +119,21 @@ public class AccountProvisioningService {
             throw new ConflictException("Un compte existe déjà pour cette adresse e-mail.");
         }
         return userRepository.save(new User(normalizedEmail, passwordEncoder.encode(password), role));
+    }
+
+    private void applyProfile(Doctor doctor, CreateDoctorRequest request) {
+        doctor.updateProfile(
+                request.firstName(),
+                request.lastName(),
+                null,
+                request.professionalPhone(),
+                request.officeAddress(),
+                request.officeCity(),
+                request.professionalNumber(),
+                request.documentUrl(),
+                true);
+        if (StringUtils.hasText(request.documentUrl())) {
+            doctor.setDocumentUploadedAt(java.time.Instant.now());
+        }
     }
 }

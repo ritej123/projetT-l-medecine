@@ -20,7 +20,6 @@ import com.telemed.platform.patient.domain.Patient;
 import com.telemed.platform.user.domain.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.access.AccessDeniedException;
 
 class TeleconsultationAccessServiceTest {
 
@@ -62,7 +61,7 @@ class TeleconsultationAccessServiceTest {
     @Test
     void deniesNonParticipants() {
         assertThatThrownBy(() -> service.assertCanJoin(APPOINTMENT_ID, "other@example.test"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(TeleconsultationAccessDeniedException.class);
     }
 
     @Test
@@ -78,18 +77,26 @@ class TeleconsultationAccessServiceTest {
                 ZONE);
 
         assertThatThrownBy(() -> beforeStart.assertCanJoin(APPOINTMENT_ID, "patient@example.test"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(TeleconsultationAccessDeniedException.class);
         assertThatThrownBy(() -> afterEnd.assertCanJoin(APPOINTMENT_ID, "patient@example.test"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(TeleconsultationAccessDeniedException.class);
     }
 
     @Test
     void deniesCancelledAndCompletedAppointments() {
         when(appointment.getStatus()).thenReturn(AppointmentStatus.CANCELLED);
         assertThatThrownBy(() -> service.assertCanJoin(APPOINTMENT_ID, "patient@example.test"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(TeleconsultationAccessDeniedException.class);
         when(appointment.getStatus()).thenReturn(AppointmentStatus.DONE);
         assertThatThrownBy(() -> service.assertCanJoin(APPOINTMENT_ID, "patient@example.test"))
-                .isInstanceOf(AccessDeniedException.class);
+                .isInstanceOf(TeleconsultationAccessDeniedException.class);
+    }
+
+    @Test
+    void allowsJoiningPendingAppointmentsDuringTheirWindow() {
+        when(appointment.getStatus()).thenReturn(AppointmentStatus.PENDING);
+
+        assertThatCode(() -> service.assertCanJoin(APPOINTMENT_ID, "patient@example.test")).doesNotThrowAnyException();
+        assertThatCode(() -> service.assertCanJoin(APPOINTMENT_ID, "doctor@example.test")).doesNotThrowAnyException();
     }
 }

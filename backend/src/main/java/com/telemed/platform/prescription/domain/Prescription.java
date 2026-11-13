@@ -129,4 +129,13 @@ public class Prescription {
         this.contentSha256 = contentSha256;
         this.digitalSignature = digitalSignature;
     }
+
+    public void validateOn(LocalDate date) {
+        this.status = PrescriptionStatus.VALIDATED;
+        this.date = date;
+        this.signedByUserId = null;
+        this.signedAt = null;
+        this.contentSha256 = null;
+        this.digitalSignature = null;
+    }
 }

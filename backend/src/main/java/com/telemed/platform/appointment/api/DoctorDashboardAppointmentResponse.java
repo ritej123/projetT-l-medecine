@@ -11,5 +11,16 @@ public record DoctorDashboardAppointmentResponse(
         String patientEmail,
         LocalDateTime scheduledAt,
         int durationMinutes,
-        AppointmentStatus status) {
+        AppointmentStatus status,
+        String consultationReason) {
+
+    public DoctorDashboardAppointmentResponse(
+            UUID id,
+            UUID patientId,
+            String patientEmail,
+            LocalDateTime scheduledAt,
+            int durationMinutes,
+            AppointmentStatus status) {
+        this(id, patientId, patientEmail, scheduledAt, durationMinutes, status, null);
+    }
 }

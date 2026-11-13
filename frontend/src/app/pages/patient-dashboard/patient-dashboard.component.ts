@@ -1,8 +1,9 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
-import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../../core/telemed-api.service';
+import { Appointment, DoctorProfile, PatientPrescription, TelemedApiService } from '../../core/telemed-api.service';
 
 @Component({
   selector: 'app-patient-dashboard',
@@ -14,8 +15,8 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
         <a class="brand" routerLink="/"><span class="logo">+</span><span>ClairSanté<small>ESPACE PATIENT</small></span></a>
         <nav aria-label="Navigation principale">
           <a class="active" routerLink="/patient"><span class="material-icons">grid_view</span>Vue d'ensemble</a>
-          <a routerLink="/reservation"><span class="material-icons">calendar_month</span>Prendre rendez-vous</a>
-          <a href="#prescriptions"><span class="material-icons">description</span>Mes ordonnances</a>
+          <a routerLink="/medecins"><span class="material-icons">calendar_month</span>Prendre rendez-vous</a>
+          <a routerLink="/patient/ordonnances"><span class="material-icons">description</span>Mes ordonnances</a>
         </nav>
         <div class="sidebar-help"><span class="material-icons">shield</span><strong>Votre espace est privé</strong><p>Vos informations de santé restent protégées.</p></div>
         <button class="logout" type="button" (click)="signOut()"><span class="material-icons">logout</span>Se déconnecter</button>
@@ -24,7 +25,7 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
         <header class="topbar"><div class="breadcrumb">Mon espace <span>/</span> Tableau de bord</div><div class="user-pill"><span class="avatar">{{ initials }}</span><span>{{ email }}</span></div></header>
         <section class="welcome">
           <div><span class="eyebrow">VOTRE SANTÉ, EN TOUTE SIMPLICITÉ</span><h1>Bonjour, {{ firstName }} <span>✦</span></h1><p>Retrouvez vos rendez-vous et documents médicaux au même endroit.</p></div>
-          <a class="primary" routerLink="/reservation"><span class="material-icons">add</span>Prendre rendez-vous</a>
+          <a class="primary" routerLink="/medecins"><span class="material-icons">add</span>Prendre rendez-vous</a>
         </section>
 
         @if (error()) { <div class="notice" role="alert">{{ error() }}</div> }
@@ -35,20 +36,27 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
         </section>
 
         <section class="section-block">
-          <div class="section-heading"><div><span class="eyebrow">À NE PAS MANQUER</span><h2>Vos prochains rendez-vous</h2></div><a routerLink="/reservation">Voir les disponibilités <span>→</span></a></div>
+          <div class="section-heading"><div><span class="eyebrow">À NE PAS MANQUER</span><h2>Vos prochains rendez-vous</h2></div><a routerLink="/medecins">Voir les disponibilités <span>→</span></a></div>
           @if (loading()) {
             <div class="empty"><span class="loader"></span><p>Chargement de vos rendez-vous…</p></div>
           } @else if (upcoming().length === 0) {
-            <div class="empty"><span class="empty-icon material-icons">event_note</span><h3>Rien de prévu pour le moment</h3><p>Choisissez un créneau avec un professionnel de santé.</p><a class="secondary" routerLink="/reservation">Trouver un rendez-vous</a></div>
+            <div class="empty"><span class="empty-icon material-icons">event_note</span><h3>Rien de prévu pour le moment</h3><p>Choisissez un créneau avec un professionnel de santé.</p><a class="secondary" routerLink="/medecins">Trouver un rendez-vous</a></div>
           } @else {
             <div class="appointment-list">
               @for (appointment of upcoming(); track appointment.id) {
                 <article class="appointment-card">
-                  <div class="date-tile"><strong>{{ appointment.scheduledAt | date:'dd' }}</strong><span>{{ appointment.scheduledAt | date:'MMM' }}</span></div>
-                  <div class="appointment-info"><h3>Consultation {{ specialtyFor(appointment.doctorId) }}</h3><p><span class="material-icons">schedule</span>{{ appointment.scheduledAt | date:'EEEE d MMMM, HH:mm':'':'fr' }} · {{ appointment.durationMinutes }} min</p></div>
+                  <div class="date-tile"><strong>{{ appointmentDate(appointment.scheduledAt) | date:'dd':'UTC' }}</strong><span>{{ appointmentDate(appointment.scheduledAt) | date:'MMM':'UTC' }}</span></div>
+                  <div class="appointment-info"><h3>Consultation {{ specialtyFor(appointment.doctorId) }}</h3><p><span class="material-icons">schedule</span>{{ appointmentDate(appointment.scheduledAt) | date:'EEEE d MMMM, HH:mm':'UTC':'fr' }} · {{ appointment.durationMinutes }} min</p></div>
                   <span class="status" [class.confirmed]="appointment.status === 'CONFIRMED'">{{ appointment.status === 'CONFIRMED' ? 'Confirmé' : 'En attente' }}</span>
                   @if (appointment.status === 'CONFIRMED') {
-                    <a class="icon-action" [routerLink]="['/teleconsultation', appointment.id]" aria-label="Ouvrir la téléconsultation"><span class="material-icons">videocam</span></a>
+                    <div class="video-action">
+                      @if (canJoinTeleconsultation(appointment)) {
+                        <a class="icon-action" [routerLink]="['/teleconsultation', appointment.id]"><span class="material-icons">videocam</span>Rejoindre</a>
+                      } @else {
+                        <span class="icon-action unavailable"><span class="material-icons">videocam</span>Salle vidéo</span>
+                        <small>Disponible à {{ appointmentDate(appointment.scheduledAt) | date:'HH:mm':'UTC' }}</small>
+                      }
+                    </div>
                   }
                   <button type="button" class="cancel-action" (click)="cancelAppointment(appointment)"
                           [disabled]="cancelingId() !== null">
@@ -61,7 +69,7 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
         </section>
 
         <section id="prescriptions" class="section-block prescriptions">
-          <div class="section-heading"><div><span class="eyebrow">DOCUMENTS MÉDICAUX</span><h2>Mes ordonnances</h2></div><span class="doc-count">{{ prescriptions().length }} document{{ prescriptions().length === 1 ? '' : 's' }}</span></div>
+          <div class="section-heading"><div><span class="eyebrow">DOCUMENTS MÉDICAUX</span><h2>Mes ordonnances</h2></div><a class="doc-count" routerLink="/patient/ordonnances">Consulter par médecin →</a></div>
           @if (prescriptions().length === 0) {
             <div class="empty compact"><span class="empty-icon material-icons">folder_open</span><h3>Aucune ordonnance disponible</h3><p>Les ordonnances validées par votre médecin s’afficheront ici.</p></div>
           } @else {
@@ -69,7 +77,7 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
               @for (prescription of prescriptions(); track prescription.id) {
                 <article class="prescription-card">
                   <span class="document-icon material-icons">description</span>
-                  <div><h3>Ordonnance médicale</h3><p>Émise le {{ prescription.date | date:'d MMMM y':'':'fr' }}</p></div>
+                  <div><h3>Dr {{ prescription.doctorName }} · {{ prescription.doctorSpecialty }}</h3><p>Émise le {{ prescription.date | date:'d MMMM y':'':'fr' }}</p></div>
                   <button type="button" class="download" (click)="downloadPrescription(prescription)">Télécharger PDF <span class="material-icons">download</span></button>
                 </article>
               }
@@ -120,6 +128,9 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
     .appointment-info { min-width:0; flex:1; }.appointment-info h3,.prescription-card h3 { margin:0 0 5px; color:#2a4851; font-size:13px; }.appointment-info p,.prescription-card p { display:flex; align-items:center; gap:4px; margin:0; color:#829094; font-size:10px; }.appointment-info p .material-icons { font-size:13px; }
     .status { border-radius:20px; padding:6px 9px; background:#fff5e2; color:#a47929; font-size:9px; font-weight:700; }.status.confirmed { background:#e5f5ed; color:#287d5c; }
     .icon-action { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; background:#eaf5f1; color:#087e75; }.icon-action .material-icons { font-size:18px; }
+    .icon-action { display:flex; width:auto; gap:6px; padding:0 10px; font-size:10px; font-weight:700; text-decoration:none; white-space:nowrap; }
+    .icon-action.unavailable { background:#f0f3f2; color:#849294; }
+    .video-action { display:grid; justify-items:center; gap:3px; }.video-action small { color:#75888b; font-size:9px; white-space:nowrap; }
     .cancel-action { border:1px solid #f0dddd; border-radius:9px; padding:8px 10px; background:#fff; color:#a44d48; font:inherit; font-size:10px; font-weight:700; cursor:pointer; }.cancel-action:disabled { opacity:.55; cursor:wait; }
     .empty { display:grid; min-height:180px; justify-items:center; align-content:center; border:1px dashed #d9e5e2; border-radius:16px; background:#fff; text-align:center; }.empty p { margin:7px 0 15px; color:#869497; font-size:12px; }.empty h3 { margin:9px 0 0; color:#39565e; font-size:14px; }.empty-icon { color:#5c9a8c; font-size:30px; }.empty.compact { min-height:145px; }.secondary { padding:9px 13px; font-size:11px; }
     .loader { width:20px; height:20px; border:2px solid #d5e9e3; border-top-color:#087e75; border-radius:50%; animation:spin .7s linear infinite; }.notice { border-radius:10px; padding:12px; background:#fff1ee; color:#9a463e; font-size:12px; }
@@ -132,13 +143,15 @@ import { Appointment, DoctorProfile, Prescription, TelemedApiService } from '../
     @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms!important; transition-duration:.01ms!important; } }
   `]
 })
-export class PatientDashboardComponent implements OnInit {
+export class PatientDashboardComponent implements OnInit, OnDestroy {
   readonly loading = signal(true);
   readonly error = signal('');
   readonly appointments = signal<Appointment[]>([]);
   readonly doctors = signal<DoctorProfile[]>([]);
-  readonly prescriptions = signal<Prescription[]>([]);
+  readonly prescriptions = signal<PatientPrescription[]>([]);
   readonly cancelingId = signal<string | null>(null);
+  private readonly currentTime = signal(Date.now());
+  private clockInterval?: ReturnType<typeof setInterval>;
 
   constructor(private readonly api: TelemedApiService, private readonly auth: AuthService) {}
 
@@ -147,10 +160,42 @@ export class PatientDashboardComponent implements OnInit {
   get initials(): string { return this.email.slice(0, 1).toUpperCase(); }
 
   upcoming(): Appointment[] {
+    const now = this.appointmentLocalNowAsUtc();
     return this.appointments()
       .filter(item => item.status === 'PENDING' || item.status === 'CONFIRMED')
-      .filter(item => new Date(item.scheduledAt).getTime() >= Date.now())
+      .filter(item => item.status === 'CONFIRMED'
+        ? this.appointmentDate(item.scheduledAt).getTime() + item.durationMinutes * 60_000 > now
+        : this.appointmentDate(item.scheduledAt).getTime() >= now)
       .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  }
+
+  canJoinTeleconsultation(appointment: Appointment): boolean {
+    const startsAt = this.appointmentDate(appointment.scheduledAt).getTime();
+    const now = this.appointmentLocalNowAsUtc();
+    return appointment.status === 'CONFIRMED'
+      && startsAt <= now
+      && now < startsAt + appointment.durationMinutes * 60_000;
+  }
+
+  appointmentDate(value: string): Date {
+    return new Date(/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`);
+  }
+
+  private appointmentLocalNowAsUtc(): number {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Paris',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(new Date(this.currentTime()));
+    const values = Object.fromEntries(parts.filter(part => part.type !== 'literal')
+      .map(part => [part.type, Number(part.value)]));
+    return Date.UTC(values['year'], values['month'] - 1, values['day'],
+      values['hour'], values['minute'], values['second']);
   }
 
   specialtyFor(doctorId: string): string {
@@ -161,6 +206,7 @@ export class PatientDashboardComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.clockInterval = setInterval(() => this.currentTime.set(Date.now()), 30_000);
     this.api.patientAppointments().subscribe({
       next: appointments => { this.appointments.set(appointments); this.loading.set(false); },
       error: () => { this.loading.set(false); this.error.set('Vos rendez-vous ne sont pas disponibles pour le moment.'); }
@@ -175,17 +221,23 @@ export class PatientDashboardComponent implements OnInit {
     });
   }
 
-  downloadPrescription(prescription: Prescription): void {
+  ngOnDestroy(): void {
+    if (this.clockInterval) clearInterval(this.clockInterval);
+  }
+
+  downloadPrescription(prescription: PatientPrescription): void {
     this.api.prescriptionPdf(prescription.id).subscribe({
       next: blob => {
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
         anchor.download = `ordonnance-${prescription.id}.pdf`;
+        document.body.appendChild(anchor);
         anchor.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(anchor);
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       },
-      error: () => this.error.set('Le téléchargement du document a échoué.')
+      error: () => this.error.set('Le téléchargement du document a échoué. Réessayez dans quelques instants.')
     });
   }
 

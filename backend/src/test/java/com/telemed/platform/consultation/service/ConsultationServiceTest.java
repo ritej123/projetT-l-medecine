@@ -1,5 +1,6 @@
 package com.telemed.platform.consultation.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -37,6 +38,34 @@ class ConsultationServiceTest {
     @Mock private ConsultationRevisionRepository revisionRepository;
     @Mock private AppointmentNotificationService appointmentNotificationService;
     @Mock private DoctorNotificationService doctorNotificationService;
+
+    @Test
+    void returnsEmptyWhenTheOwnedAppointmentHasNoConsultationYet() {
+        UUID doctorId = UUID.randomUUID();
+        UUID appointmentId = UUID.randomUUID();
+        Doctor doctor = doctor("doctor@example.test", doctorId);
+        Appointment appointment = new Appointment(
+                new Patient(new User("patient@example.test", "hash", Role.PATIENT), null),
+                doctor,
+                java.time.LocalDateTime.now(),
+                30);
+        ReflectionTestUtils.setField(appointment, "id", appointmentId);
+        appointment.setStatus(com.telemed.platform.appointment.domain.AppointmentStatus.CONFIRMED);
+        when(doctorRepository.findByUserEmail("doctor@example.test")).thenReturn(Optional.of(doctor));
+        when(appointmentRepository.findWithDoctorUserById(appointmentId)).thenReturn(Optional.of(appointment));
+        when(consultationRepository.findByAppointmentId(appointmentId)).thenReturn(Optional.empty());
+        ConsultationService service = new ConsultationService(
+                doctorRepository,
+                appointmentRepository,
+                consultationRepository,
+                revisionRepository,
+                Clock.systemUTC(),
+                appointmentNotificationService,
+                doctorNotificationService,
+                ZoneId.of("Europe/Paris"));
+
+        assertThat(service.findMine("doctor@example.test", appointmentId)).isEmpty();
+    }
 
     @Test
     void hidesAnotherDoctorsAppointmentWhenLookingUpConsultation() {

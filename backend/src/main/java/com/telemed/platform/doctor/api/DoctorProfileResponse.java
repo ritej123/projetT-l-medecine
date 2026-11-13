@@ -14,7 +14,10 @@ public record DoctorProfileResponse(
         String bio,
         String professionalPhone,
         String officeAddress,
+        String officeCity,
         String professionalNumber,
+        String documentUrl,
+        java.time.Instant documentUploadedAt,
         boolean professionalNumberVerified,
         boolean emailNotificationsEnabled,
         DoctorVerificationStatus verificationStatus) {

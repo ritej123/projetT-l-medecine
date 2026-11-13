@@ -40,6 +40,9 @@ public class Appointment {
     @Column(name = "duration_minutes", nullable = false)
     private int durationMinutes;
 
+    @Column(name = "consultation_reason", length = 500)
+    private String consultationReason;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private AppointmentStatus status;
@@ -52,10 +55,16 @@ public class Appointment {
     }
 
     public Appointment(Patient patient, Doctor doctor, LocalDateTime scheduledAt, int durationMinutes) {
+        this(patient, doctor, scheduledAt, durationMinutes, null);
+    }
+
+    public Appointment(
+            Patient patient, Doctor doctor, LocalDateTime scheduledAt, int durationMinutes, String consultationReason) {
         this.patient = patient;
         this.doctor = doctor;
         this.scheduledAt = scheduledAt;
         this.durationMinutes = durationMinutes;
+        this.consultationReason = consultationReason;
         this.status = AppointmentStatus.PENDING;
     }
 
@@ -77,6 +86,10 @@ public class Appointment {
 
     public int getDurationMinutes() {
         return durationMinutes;
+    }
+
+    public String getConsultationReason() {
+        return consultationReason;
     }
 
     public AppointmentStatus getStatus() {

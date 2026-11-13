@@ -46,19 +46,21 @@ public class AdminAccountController {
 
     @GetMapping("/doctors/pending")
     public List<DoctorRegistrationResponse> findPendingDoctorApplications() {
-        return adminManagementService.doctors(
-                        null, DoctorVerificationStatus.PENDING, null, null, null, 0, 100)
-                .getContent()
-                .stream()
-                .map(doctor -> new DoctorRegistrationResponse(
-                        doctor.id(), doctor.email(), doctor.specialty(), doctor.bio()))
-                .toList();
+        return adminManagementService.findPendingDoctorApplications();
     }
 
     @PatchMapping("/doctors/{doctorId}/approve")
     public AdminDoctorResponse approveDoctorApplication(
             @PathVariable UUID doctorId, @AuthenticationPrincipal Jwt jwt) {
         return adminManagementService.verifyDoctor(doctorId, jwt.getClaimAsString("email"));
+    }
+
+    @PatchMapping("/doctors/{doctorId}/reject")
+    public AdminDoctorResponse rejectDoctorApplication(
+            @PathVariable UUID doctorId,
+            @Valid @RequestBody RejectDoctorRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return adminManagementService.rejectDoctor(doctorId, request.reason(), jwt.getClaimAsString("email"));
     }
 
     @PostMapping("/patients")

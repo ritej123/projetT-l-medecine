@@ -130,7 +130,11 @@ public class AppointmentService {
         try {
             appointmentSlotRepository.saveAndFlush(slot);
             Appointment appointment = appointmentRepository.saveAndFlush(new Appointment(
-                    patient, doctor, scheduledAt, availability.getSlotDurationMinutes()));
+                    patient,
+                    doctor,
+                    scheduledAt,
+                    availability.getSlotDurationMinutes(),
+                    cleanReason(request.consultationReason())));
             notificationService.enqueueForBooking(appointment, patient.getUser().getEmail());
             enqueueDoctorEmailNotice(appointment);
             doctorNotificationService.appointmentCreated(appointment);
@@ -353,6 +357,10 @@ public class AppointmentService {
             LocalTime slotStart, LocalTime slotEnd, AvailabilityException exception) {
         return exception.getStartTime() == null
                 || slotStart.isBefore(exception.getEndTime()) && slotEnd.isAfter(exception.getStartTime());
+    }
+
+    private String cleanReason(String reason) {
+        return reason == null || reason.isBlank() ? null : reason.trim();
     }
 
     private void releaseSlot(Appointment appointment) {

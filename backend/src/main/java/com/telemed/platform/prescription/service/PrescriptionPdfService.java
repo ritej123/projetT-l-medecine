@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.telemed.platform.prescription.domain.Prescription;
-import com.telemed.platform.common.exception.InvalidRequestException;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -22,36 +21,25 @@ public class PrescriptionPdfService {
     private static final float TOP = 750;
     private static final float LINE_HEIGHT = 16;
     private static final float MAX_WIDTH = 500;
-    private final PrescriptionSignatureService signatureService;
-
-    public PrescriptionPdfService(PrescriptionSignatureService signatureService) {
-        this.signatureService = signatureService;
-    }
-
-    public byte[] createSignedPdf(Prescription prescription) {
-        String actualContentHash = sha256(prescription.getContent());
-        if (!actualContentHash.equals(prescription.getContentSha256())
-                || !signatureService.verify(
-                        prescription.getId(),
-                        prescription.getSignedByUserId(),
-                        prescription.getSignedAt().toString(),
-                        prescription.getContentSha256(),
-                        prescription.getDigitalSignature())) {
-            throw new InvalidRequestException("La signature de cette ordonnance ne peut pas être vérifiée.");
-        }
+    public byte[] createPdf(Prescription prescription) {
         try (PDDocument document = new PDDocument();
                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             PDType1Font regular = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
             PDType1Font bold = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
             List<String> lines = new ArrayList<>();
-            lines.add("ORDONNANCE MEDICALE — SIGNEE");
+            lines.add("ORDONNANCE MEDICALE");
             lines.add("");
-            lines.add("Rendez-vous : " + prescription.getAppointment().getId());
             lines.add("Date de prescription : " + prescription.getDate());
-            lines.add("Medecin signataire (identifiant interne) : " + prescription.getSignedByUserId());
-            lines.add("Signe le : " + prescription.getSignedAt());
-            lines.add("Empreinte SHA-256 du contenu signe : " + prescription.getContentSha256());
-            lines.add("Signature HMAC-SHA256 : " + prescription.getDigitalSignature());
+            var doctor = prescription.getAppointment().getDoctor();
+            String doctorName = java.util.stream.Stream.of(doctor.getFirstName(), doctor.getLastName())
+                    .filter(org.springframework.util.StringUtils::hasText)
+                    .collect(java.util.stream.Collectors.joining(" "));
+            if (!doctorName.isBlank()) {
+                lines.add("Medecin : " + doctorName);
+            }
+            if (org.springframework.util.StringUtils.hasText(doctor.getSpecialty())) {
+                lines.add("Specialite : " + doctor.getSpecialty());
+            }
             lines.add("");
             lines.add("Contenu :");
             lines.addAll(wrap(prescription.getContent(), regular, 10));
@@ -130,13 +118,4 @@ public class PrescriptionPdfService {
         return safe.toString();
     }
 
-    private String sha256(String content) {
-        try {
-            return java.util.HexFormat.of().formatHex(
-                    java.security.MessageDigest.getInstance("SHA-256")
-                            .digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable.", exception);
-        }
-    }
 }

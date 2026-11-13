@@ -58,12 +58,23 @@ public class Doctor {
     @Column(name = "office_address", length = 500)
     private String officeAddress;
 
+    @Size(max = 120)
+    @Column(name = "office_city", length = 120)
+    private String officeCity;
+
     @Size(max = 40)
     @Column(name = "professional_number", length = 40)
     private String professionalNumber;
 
     @Column(name = "professional_number_verified", nullable = false)
     private boolean professionalNumberVerified;
+
+    @Size(max = 2048)
+    @Column(name = "document_url", length = 2048)
+    private String documentUrl;
+
+    @Column(name = "document_uploaded_at")
+    private java.time.Instant documentUploadedAt;
 
     @Column(name = "email_notifications_enabled", nullable = false)
     private boolean emailNotificationsEnabled = true;
@@ -110,7 +121,10 @@ public class Doctor {
     public String getProfilePhotoUrl() { return profilePhotoUrl; }
     public String getProfessionalPhone() { return professionalPhone; }
     public String getOfficeAddress() { return officeAddress; }
+    public String getOfficeCity() { return officeCity; }
     public String getProfessionalNumber() { return professionalNumber; }
+    public String getDocumentUrl() { return documentUrl; }
+    public java.time.Instant getDocumentUploadedAt() { return documentUploadedAt; }
     public boolean isProfessionalNumberVerified() { return professionalNumberVerified; }
     public boolean isEmailNotificationsEnabled() { return emailNotificationsEnabled; }
 
@@ -120,15 +134,23 @@ public class Doctor {
             String profilePhotoUrl,
             String professionalPhone,
             String officeAddress,
+            String officeCity,
             String professionalNumber,
+            String documentUrl,
             boolean emailNotificationsEnabled) {
         this.firstName = firstName;
         this.lastName = lastName;
         this.profilePhotoUrl = profilePhotoUrl;
         this.professionalPhone = professionalPhone;
         this.officeAddress = officeAddress;
+        this.officeCity = officeCity;
         this.professionalNumber = professionalNumber;
+        this.documentUrl = documentUrl;
         this.emailNotificationsEnabled = emailNotificationsEnabled;
+    }
+
+    public void setDocumentUploadedAt(java.time.Instant documentUploadedAt) {
+        this.documentUploadedAt = documentUploadedAt;
     }
 
     public void setVerificationStatus(DoctorVerificationStatus verificationStatus) {

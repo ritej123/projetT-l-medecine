@@ -17,7 +17,7 @@ Socle de plateforme de télémédecine avec Angular, Spring Boot, PostgreSQL et 
    # Générer une valeur différente pour chaque secret, puis les inscrire dans .env :
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # DB_PASSWORD
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # JWT_SECRET
-   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # PRESCRIPTION_SIGNING_SECRET
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # JWT_SECRET
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" # BOOTSTRAP_ADMIN_PASSWORD (facultatif si un admin existe déjà)
    ```
 
@@ -39,7 +39,7 @@ Socle de plateforme de télémédecine avec Angular, Spring Boot, PostgreSQL et 
    mvn spring-boot:run
    ```
 
-   Les secrets JWT et de signature doivent chacun contenir au moins 32 octets. Le profil `dev` génère des clés éphémères si elles ne sont pas définies ; elles sont perdues au redémarrage et ne conviennent jamais aux données persistantes. Configurez `BOOTSTRAP_ADMIN_EMAIL` et son mot de passe (12 à 72 octets) pour créer le premier administrateur. Un compte ADMIN existant et son mot de passe ne sont pas modifiés ; une adresse déjà attribuée à un autre rôle bloque le démarrage.
+   Le secret JWT doit contenir au moins 32 octets hors profil `dev`. Configurez `BOOTSTRAP_ADMIN_EMAIL` et son mot de passe (12 à 72 octets) pour créer le premier administrateur. Un compte ADMIN existant et son mot de passe ne sont pas modifiés ; une adresse déjà attribuée à un autre rôle bloque le démarrage.
 
 4. Démarrer Angular dans un autre terminal :
 
@@ -53,9 +53,9 @@ Socle de plateforme de télémédecine avec Angular, Spring Boot, PostgreSQL et 
 
    Les parcours Angular incluent l'accueil, l'inscription/connexion, les tableaux de bord patient, médecin et administrateur, ainsi que la réservation mensuelle des créneaux libres. Le navigateur conserve les jetons dans `sessionStorage`; les routes patient/médecin/administrateur sont protégées par le rôle du jeton et chaque appel API envoie le jeton d'accès. Un compte doté du rôle ADMIN ouvre l'espace `/admin` pour consulter les statistiques, gérer les comptes et rendez-vous, valider les médecins et consulter le journal d'audit. L'espace patient permet de réserver, consulter ses ordonnances et annuler ses rendez-vous actifs. L'espace médecin s'appuie sur les API sécurisées pour consulter les statistiques, gérer son agenda et ses indisponibilités, suivre ses patients autorisés, rédiger des comptes rendus, gérer les ordonnances et retrouver ses notifications.
 
-Le profil `prod` (à activer avec `SPRING_PROFILES_ACTIVE=prod`) exige `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `PRESCRIPTION_SIGNING_SECRET` et `CORS_ALLOWED_ORIGINS`. Le backend refuse aussi de démarrer hors profil `dev` si le mot de passe de base est absent ou si les secrets cryptographiques font moins de 32 octets. En production, injectez les secrets depuis un gestionnaire de secrets ; ne chargez pas `.env` depuis le dépôt.
+Le profil `prod` (à activer avec `SPRING_PROFILES_ACTIVE=prod`) exige `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET` et `CORS_ALLOWED_ORIGINS`. Le backend refuse aussi de démarrer hors profil `dev` si le mot de passe de base est absent ou si le secret JWT fait moins de 32 octets. En production, injectez les secrets depuis un gestionnaire de secrets ; ne chargez pas `.env` depuis le dépôt.
 
-Sans Docker, créez une base PostgreSQL `telemed` et un utilisateur `telemed` avec un mot de passe non vide, puis fournissez les variables de connexion.
+Sans Docker, créez une base PostgreSQL nommée `basetélé` et un utilisateur compatible (par défaut `postgres` dans les configs locales) avec un mot de passe non vide, puis fournissez les variables de connexion.
 
 ## Structure
 
@@ -69,6 +69,8 @@ frontend/  application Angular standalone, Angular Material et Tailwind CSS
 Les routes `/api/v1/patient/**`, `/api/v1/doctor/**` et `/api/v1/admin/**` sont respectivement réservées aux rôles `PATIENT`, `DOCTOR` et `ADMIN`, en complément des contrôles d'accès métier des contrôleurs et services. La salle de téléconsultation est réservée aux patients et médecins authentifiés participant au rendez-vous.
 
 - `POST /api/v1/auth/login` : connexion par e-mail/mot de passe ; retourne un access token (15 min) et un refresh token (14 jours).
+- `GET /api/captcha` : génère une image CAPTCHA PNG de 200 × 70 px. La réponse contient seulement `captcha_id` et l’image encodée ; la réponse attendue reste en cache serveur deux minutes et ne peut être utilisée qu’une fois.
+- La connexion exige `captcha_id` et `captcha_text` avec l’e-mail et le mot de passe. Le serveur consomme et vérifie le CAPTCHA avant de vérifier le mot de passe ; une erreur de connexion invalide le CAPTCHA.
 - `POST /api/v1/auth/register` : inscription publique d'un compte patient uniquement ; elle crée un profil sans dossier médical et retourne les jetons de session. La connexion et l'inscription sont limitées ensemble à cinq requêtes par minute et par adresse réseau observée.
 - `POST /api/v1/auth/register/doctor` : dépôt public d'une demande de compte médecin (`email`, `password`, `specialty`, `bio`). Le compte est désactivé jusqu'à validation administrative et ne reçoit aucun jeton à l'inscription.
 - `GET /api/v1/admin/accounts/doctors/pending` : liste les demandes médecins en attente, réservée à `ADMIN`.
@@ -85,18 +87,17 @@ Les routes `/api/v1/patient/**`, `/api/v1/doctor/**` et `/api/v1/admin/**` sont 
 - `GET /api/v1/doctor/dashboard/stats` fournit des statistiques calculées pour le médecin authentifié et dans le fuseau de rendez-vous configuré.
 - `PATCH /api/v1/doctor/appointments/{id}/reschedule` replanifie un rendez-vous futur en vérifiant les disponibilités, exceptions, réservations concurrentes et conflits. Le patient reçoit une notification par e-mail via l'outbox existante.
 - `GET /api/v1/doctor/patients` retourne une liste paginée limitée aux patients ayant un rendez-vous confirmé ou terminé avec ce médecin ; `GET /api/v1/doctor/patients/{id}` vérifie la même relation avant de retourner le dossier médical et l'historique autorisé.
-- `GET` et `PUT /api/v1/doctor/appointments/{id}/consultation` enregistrent le compte rendu, les observations et le diagnostic, avec une révision conservée à chaque sauvegarde. Une consultation finalisée devient en lecture seule et termine le rendez-vous.
+- `GET` et `PUT /api/v1/doctor/appointments/{id}/consultation` enregistrent le compte rendu, les observations et le diagnostic, avec une révision conservée à chaque sauvegarde. Le GET retourne HTTP 204 si le compte rendu n'a pas encore été créé ; une consultation finalisée devient en lecture seule et termine le rendez-vous.
 - `/api/v1/doctor/profile` permet au médecin de gérer les informations de contact sans changer son rôle, son statut de vérification ou le statut de vérification de son numéro professionnel.
 - `/api/v1/doctor/notifications` retourne les notifications du médecin connecté et permet de marquer une notification comme lue ; les rappels in-app sont créés pour les rendez-vous proches.
-- `GET /api/v1/doctor/appointments/{id}/prescription` permet de retrouver l'ordonnance liée au rendez-vous. Le médecin peut rédiger et enregistrer un brouillon manuel pendant un rendez-vous confirmé en cours ou après sa fin, depuis le parcours de consultation ; le brouillon n'est pas visible du patient avant validation et signature.
-- `GET /api/v1/patient/doctors` retourne l'annuaire des médecins et leurs spécialités, sans exposer les comptes utilisateur.
+- `GET /api/v1/doctor/appointments/{id}/prescription` permet de retrouver l'ordonnance liée au rendez-vous et retourne HTTP 204 si aucune n'est encore créée. Le médecin peut rédiger et enregistrer un brouillon manuel pendant un rendez-vous confirmé en cours ou après sa fin, depuis le parcours de consultation ; le brouillon n'est pas visible du patient avant validation.
+- `GET /api/v1/patient/doctors` retourne l'annuaire des médecins et leurs spécialités, sans exposer les comptes utilisateur ; `GET /api/v1/patient/doctors/{doctorId}` retourne le profil public vérifié et ses horaires habituels.
 - `GET /api/v1/patient/appointments/doctors/{doctorId}/slots?from=YYYY-MM-DD&to=YYYY-MM-DD` retourne uniquement les créneaux libres, pour une période maximale de 31 jours.
-- `POST /api/v1/patient/appointments` réserve un début de créneau exact ; une annulation médecin/patient libère le créneau.
+- `POST /api/v1/patient/appointments` réserve un début de créneau exact ; le champ facultatif `consultationReason` (500 caractères maximum) est conservé pour le patient et son médecin. Le backend revérifie les disponibilités et refuse les réservations concurrentes ; une annulation médecin/patient libère le créneau.
 - `/api/v1/patient/appointments` et `/api/v1/patient/prescriptions` : gestion patient ; seules les ordonnances validées sont retournées.
 - `POST /api/v1/doctor/appointments/{appointmentId}/prescription/draft` : génère un brouillon d'ordonnance à partir des notes, après anonymisation côté serveur, pendant la plage d'une consultation confirmée ou après un rendez-vous terminé.
 - `PUT /api/v1/doctor/prescriptions/{id}` : modification du brouillon ; `GET .../{id}/history` : historique des révisions, réservé au médecin traitant.
-- `PATCH /api/v1/doctor/prescriptions/{id}/validate` : relecture/validation et signature par le médecin ; PDF disponible à `/api/v1/doctor/prescriptions/{id}/pdf` et pour le patient concerné à `/api/v1/patient/prescriptions/{id}/pdf`.
-- La validation nécessite `PRESCRIPTION_SIGNING_SECRET` configuré côté serveur avec au moins 32 octets. Sans cette configuration, l'API retourne HTTP 503 et conserve le brouillon sans prétendre qu'il est signé.
+- `PATCH /api/v1/doctor/prescriptions/{id}/validate` : validation par le médecin ; le PDF standard, sans signature numérique, est disponible à `/api/v1/doctor/prescriptions/{id}/pdf` et pour le patient concerné à `/api/v1/patient/prescriptions/{id}/pdf`.
 - `GET /api/v1/health` : endpoint public ne retournant que l'état du service.
 - `/teleconsultation/{appointmentId}` : salle vidéo Angular. Avant d’activer les périphériques, `GET /api/v1/teleconsultations/{appointmentId}/access` vérifie que l’utilisateur est le patient ou le médecin du rendez-vous, que celui-ci est confirmé et que l’horaire de consultation est en cours. La signalisation STOMP est authentifiée par JWT et réapplique cette autorisation aux abonnements et messages.
 
@@ -106,7 +107,7 @@ Les routes métier exigent `Authorization: Bearer <access_token>` et vérifient 
 
 Les réservations sont transactionnelles. Un verrou optimiste versionné sur chaque créneau, des contraintes d'exclusion PostgreSQL contre les chevauchements de réservations et de plages de disponibilité, ainsi que les contraintes uniques, empêchent les doubles réservations et les horaires qui se chevauchent ; les conflits concurrents retournent HTTP 409. La migration `V3` utilise l'extension PostgreSQL `btree_gist`.
 
-Les migrations additives `V6` et `V7` étendent le profil professionnel, les comptes rendus et leur historique, les indisponibilités datées, le centre de notifications et l'outbox de replanification. Elles conservent les comptes et rendez-vous déjà présents ; aucun effacement ni réinitialisation du schéma n'est requis.
+Les migrations additives `V6` et `V7` étendent le profil professionnel, les comptes rendus et leur historique, les indisponibilités datées, le centre de notifications et l'outbox de replanification. La migration `V12` ajoute le motif de consultation nullable sans modifier les rendez-vous existants. Ces migrations conservent les données présentes ; aucun effacement ni réinitialisation du schéma n'est requis.
 
 Les confirmations sont placées dans une outbox transactionnelle à l'enregistrement ; un rappel est planifié une heure avant le rendez-vous si celui-ci est réservé plus d'une heure à l'avance. Les notifications sont envoyées par SMTP (`MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`) avec reprises et délai exponentiel. En cas d'annulation, les messages encore en attente sont supprimés de la file. Le fuseau horaire est configurable avec `APPOINTMENT_ZONE_ID` (défaut `Europe/Paris`). Configurez SMTP pour activer l'envoi réel.
 
@@ -116,7 +117,7 @@ Les dossiers patients et contenus d'ordonnance sont des données de santé : ils
 
 La génération LLM est uniquement serveur et utilise une API compatible Chat Completions. Configurez `LLM_PRESCRIPTION_ENDPOINT` (HTTPS), `LLM_PRESCRIPTION_API_KEY` et `LLM_PRESCRIPTION_MODEL`. Si ces paramètres sont absents, la génération répond `503`. La génération est réservée au médecin du rendez-vous, soit pendant le créneau d'un rendez-vous confirmé, soit après un rendez-vous terminé. Aucun identifiant de compte, rendez-vous ou dossier patient n'est envoyé. `MedicalNoteAnonymizer` masque les identifiants courants (champs nom/patient, noms précédés d'un titre, date de naissance explicite, téléphone, e-mail, NIR et adresses) avant l'appel ; il ne constitue pas une garantie de désidentification parfaite. Le médecin doit vérifier le texte anonymisé et choisir un fournisseur/juridiction/contrat autorisé pour des données de santé avant tout déploiement.
 
-La consigne LLM interdit d'inventer médicaments ou posologies et impose un brouillon clairement marqué comme non validé. Le brouillon n'est jamais visible dans l'espace patient. Le médecin peut l'éditer ; chaque création, génération, modification et validation est conservée comme révision avec l'identifiant du compte acteur. La validation enregistre un HMAC-SHA256 lié au contenu, au médecin et à l'instant de signature (`PRESCRIPTION_SIGNING_SECRET`, secret distinct d'au moins 32 octets), et l'export PDF vérifie le HMAC et l'empreinte du contenu. Cela fournit une attestation d'intégrité applicative, pas une signature électronique qualifiée ni un service de confiance réglementé.
+La consigne LLM interdit d'inventer médicaments ou posologies et impose un brouillon clairement marqué comme non validé. Le brouillon n'est jamais visible dans l'espace patient. Le médecin peut l'éditer ; chaque création, génération, modification et validation est conservée comme révision avec l'identifiant du compte acteur. Après validation, le patient peut télécharger un PDF standard de l'ordonnance, sans signature numérique.
 
 ### Téléconsultation vidéo
 
