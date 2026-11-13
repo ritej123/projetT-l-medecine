@@ -7,10 +7,13 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import com.telemed.platform.common.security.EphemeralSecret;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -31,6 +34,7 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.util.StringUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -52,6 +56,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/health", "/ws", "/ws/**").permitAll()
+                        .requestMatchers("/api/captcha").permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/login",
                                 "/api/v1/auth/register",
@@ -110,7 +115,20 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecretKey jwtSecretKey(@Value("${app.security.jwt.secret:}") String secret) {
+    SecretKey jwtSecretKey(
+            @Value("${app.security.jwt.secret:}") String secret,
+            Environment environment) {
+        return jwtSecretKey(secret, environment.acceptsProfiles(Profiles.of("dev")));
+    }
+
+    SecretKey jwtSecretKey(String secret) {
+        return jwtSecretKey(secret, false);
+    }
+
+    private SecretKey jwtSecretKey(String secret, boolean developmentProfile) {
+        if (!StringUtils.hasText(secret) && developmentProfile) {
+            secret = EphemeralSecret.generate();
+        }
         byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
         if (secretBytes.length < 32) {
             throw new IllegalStateException("JWT_SECRET must contain at least 32 bytes.");

@@ -3,6 +3,7 @@ package com.telemed.platform.consultation.service;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -58,12 +59,11 @@ public class ConsultationService {
     }
 
     @Transactional(readOnly = true)
-    public ConsultationResponse findMine(String email, UUID appointmentId) {
+    public Optional<ConsultationResponse> findMine(String email, UUID appointmentId) {
         Appointment appointment = ownedAppointment(email, appointmentId);
         requireClinicalAppointment(appointment);
-        Consultation consultation = consultationRepository.findByAppointmentId(appointment.getId())
-                .orElseThrow(() -> new NotFoundException("Aucun compte rendu n'est enregistré pour ce rendez-vous."));
-        return response(consultation);
+        return consultationRepository.findByAppointmentId(appointment.getId())
+                .map(this::response);
     }
 
     @Transactional

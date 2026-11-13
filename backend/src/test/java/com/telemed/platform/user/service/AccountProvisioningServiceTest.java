@@ -62,7 +62,7 @@ class AccountProvisioningServiceTest {
     @Test
     void createsDoctorAccountWithNormalizedEmailAndHashedPassword() {
         var request = new CreateDoctorRequest(
-                " DOCTOR@example.test ", "long-enough-password", "Cardiologie", "Présentation");
+                " DOCTOR@example.test ", "long-enough-password", "Cardiologie", "Présentation", "Jean", "Dupont", null, null, null, null, null);
         when(userRepository.existsByEmail("doctor@example.test")).thenReturn(false);
         when(passwordEncoder.encode(request.password())).thenReturn("bcrypt-hash");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -72,7 +72,8 @@ class AccountProvisioningServiceTest {
 
         assertThat(service.createDoctor(request)).isEqualTo(response);
         verify(passwordEncoder).encode(request.password());
-        verify(doctorRepository).save(any(Doctor.class));
+        verify(doctorRepository).save(org.mockito.ArgumentMatchers.argThat(doctor ->
+                doctor.getFirstName().equals("Jean") && doctor.getLastName().equals("Dupont")));
     }
 
     @Test
@@ -80,7 +81,7 @@ class AccountProvisioningServiceTest {
         when(userRepository.existsByEmail("doctor@example.test")).thenReturn(true);
 
         assertThatThrownBy(() -> service.createDoctor(new CreateDoctorRequest(
-                "doctor@example.test", "long-enough-password", "Cardiologie", null)))
+                "doctor@example.test", "long-enough-password", "Cardiologie", null, "Jean", "Dupont", null, null, null, null, null)))
                 .isInstanceOf(ConflictException.class);
         verify(userRepository, never()).save(any(User.class));
         verify(passwordEncoder, never()).encode(any());
@@ -105,7 +106,7 @@ class AccountProvisioningServiceTest {
     @Test
     void publicDoctorRegistrationCreatesDisabledDoctorUntilAdminApproval() {
         var request = new CreateDoctorRequest(
-                "doctor@example.test", "a-long-enough-password", " Cardiologie ", "Présentation");
+                "doctor@example.test", "a-long-enough-password", " Cardiologie ", "Présentation", "Jean", "Dupont", null, null, null, null, null);
         when(userRepository.existsByEmail(request.email())).thenReturn(false);
         when(passwordEncoder.encode(request.password())).thenReturn("bcrypt-hash");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -116,7 +117,9 @@ class AccountProvisioningServiceTest {
         verify(doctorRepository).save(org.mockito.ArgumentMatchers.argThat(doctor ->
                 doctor.getUser().getRole() == Role.DOCTOR
                         && !doctor.getUser().isEnabled()
-                        && doctor.getSpecialty().equals("Cardiologie")));
+                        && doctor.getSpecialty().equals("Cardiologie")
+                        && doctor.getFirstName().equals("Jean")
+                        && doctor.getLastName().equals("Dupont")));
     }
 
     @Test

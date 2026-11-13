@@ -31,7 +31,9 @@ public class DoctorProfileService {
                 clean(request.profilePhotoUrl()),
                 clean(request.professionalPhone()),
                 clean(request.officeAddress()),
+                clean(request.officeCity()),
                 clean(request.professionalNumber()),
+                clean(request.documentUrl()),
                 request.emailNotificationsEnabled());
         return toResponse(doctorRepository.save(doctor));
     }
@@ -47,9 +49,21 @@ public class DoctorProfileService {
 
     private DoctorProfileResponse toResponse(Doctor doctor) {
         return new DoctorProfileResponse(
-                doctor.getId(), doctor.getUser().getEmail(), doctor.getFirstName(), doctor.getLastName(),
-                doctor.getProfilePhotoUrl(), doctor.getSpecialty(), doctor.getBio(), doctor.getProfessionalPhone(),
-                doctor.getOfficeAddress(), doctor.getProfessionalNumber(), doctor.isProfessionalNumberVerified(),
-                doctor.isEmailNotificationsEnabled(), doctor.getVerificationStatus());
+                doctor.getId(),
+                doctor.getUser().getEmail(),
+                doctor.getFirstName(),
+                doctor.getLastName(),
+                doctor.getProfilePhotoUrl(),
+                doctor.getSpecialty(),
+                doctor.getBio(),
+                doctor.getProfessionalPhone(),
+                doctor.getOfficeAddress(),
+                doctor.getOfficeCity(),
+                doctor.getProfessionalNumber(),
+                doctor.getDocumentUrl(),
+                doctor.getDocumentUploadedAt(),
+                doctor.isProfessionalNumberVerified(),
+                doctor.isEmailNotificationsEnabled(),
+                doctor.getVerificationStatus());
     }
 }

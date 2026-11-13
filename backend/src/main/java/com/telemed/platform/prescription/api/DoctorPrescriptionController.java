@@ -61,9 +61,11 @@ public class DoctorPrescriptionController {
     }
 
     @GetMapping("/appointments/{appointmentId}/prescription")
-    public PrescriptionResponse findForAppointment(
+    public ResponseEntity<PrescriptionResponse> findForAppointment(
             @AuthenticationPrincipal Jwt jwt, @PathVariable UUID appointmentId) {
-        return prescriptionService.findForDoctorAppointment(jwt.getClaimAsString("email"), appointmentId);
+        return prescriptionService.findForDoctorAppointment(jwt.getClaimAsString("email"), appointmentId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.<PrescriptionResponse>noContent().build());
     }
 
     @PatchMapping("/prescriptions/{prescriptionId}/validate")
@@ -71,6 +73,13 @@ public class DoctorPrescriptionController {
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID prescriptionId) {
         return prescriptionService.validate(jwt.getClaimAsString("email"), prescriptionId);
+    }
+
+    @PatchMapping("/prescriptions/{prescriptionId}/resign")
+    public PrescriptionResponse resign(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID prescriptionId) {
+        return prescriptionService.resign(jwt.getClaimAsString("email"), prescriptionId);
     }
 
     @PutMapping("/prescriptions/{prescriptionId}")
@@ -92,7 +101,7 @@ public class DoctorPrescriptionController {
     public ResponseEntity<byte[]> exportPdf(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID prescriptionId) {
-        byte[] pdf = pdfService.createSignedPdf(
+        byte[] pdf = pdfService.createPdf(
                 prescriptionService.findFinalForDoctor(jwt.getClaimAsString("email"), prescriptionId));
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)

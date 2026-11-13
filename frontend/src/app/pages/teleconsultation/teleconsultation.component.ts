@@ -1,7 +1,13 @@
+import { DatePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, ElementRef, Inject, OnDestroy, OnInit, ViewChild, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs';
+import { firstValueFrom } from 'rxjs';
 import { AccessTokenStore } from '../../core/access-token.store';
+import { AuthService } from '../../core/auth.service';
+import { DoctorConsultation, DoctorPatientDetail, Prescription, TelemedApiService } from '../../core/telemed-api.service';
 import { TELEMED_API_BASE_URL, TELEMED_ICE_SERVERS } from './teleconsultation.config';
 
 interface RoomEvent {
@@ -22,7 +28,7 @@ interface ChatMessage {
 @Component({
   selector: 'app-teleconsultation',
   standalone: true,
-  imports: [RouterLink],
+  imports: [FormsModule, RouterLink, DatePipe],
   template: `
     <main class="call-shell">
       <header class="call-header">
@@ -40,86 +46,322 @@ interface ChatMessage {
         <p class="error-banner" role="alert">{{ error() }}</p>
       }
 
-      <section class="call-layout" aria-label="Salle de téléconsultation">
-        <div class="video-column">
-          <div class="video-stage">
-            <video #remoteVideo autoplay playsinline aria-label="Vidéo du participant"></video>
-            @if (!remoteStream()) {
-              <div class="video-placeholder">
-                <span class="avatar" aria-hidden="true">CS</span>
-                <p>{{ connected() ? 'En attente de l’autre participant…' : 'Votre consultation vidéo' }}</p>
+      @if (doctorMode()) {
+        <section class="call-layout doctor-call-layout" aria-label="Salle de téléconsultation médecin">
+          <div class="video-column">
+            <div class="video-stage">
+              <video #remoteVideo autoplay playsinline aria-label="Vidéo du participant"></video>
+              @if (!remoteStream()) {
+                <div class="video-placeholder">
+                  <span class="avatar" aria-hidden="true">CS</span>
+                  <p>{{ connected() ? 'En attente de l’autre participant…' : 'Votre consultation vidéo' }}</p>
+                </div>
+              }
+              <div class="local-video">
+                <video #localVideo autoplay muted playsinline aria-label="Aperçu de votre caméra"></video>
+                @if (!cameraEnabled()) {
+                  <span class="muted-overlay">Caméra désactivée</span>
+                }
               </div>
-            }
-            <div class="local-video">
-              <video #localVideo autoplay muted playsinline aria-label="Aperçu de votre caméra"></video>
-              @if (!cameraEnabled()) {
-                <span class="muted-overlay">Caméra désactivée</span>
+              <div class="video-caption">Consultation privée</div>
+            </div>
+
+            <div class="controls" aria-label="Commandes de l'appel">
+              <button type="button" class="control" (click)="toggleMicrophone()"
+                      [disabled]="!inCall()" [attr.aria-pressed]="microphoneEnabled()"
+                      [attr.aria-label]="microphoneEnabled() ? 'Couper le microphone' : 'Activer le microphone'">
+                <span aria-hidden="true">{{ microphoneEnabled() ? 'mic' : 'mic_off' }}</span>
+                <small>Micro</small>
+              </button>
+              <button type="button" class="control" (click)="toggleCamera()"
+                      [disabled]="!inCall()" [attr.aria-pressed]="cameraEnabled()"
+                      [attr.aria-label]="cameraEnabled() ? 'Couper la caméra' : 'Activer la caméra'">
+                <span aria-hidden="true">{{ cameraEnabled() ? 'videocam' : 'videocam_off' }}</span>
+                <small>Caméra</small>
+              </button>
+              <button type="button" class="control" (click)="toggleScreenShare()"
+                      [disabled]="!inCall()" [attr.aria-pressed]="sharingScreen()">
+                <span aria-hidden="true">present_to_all</span>
+                <small>{{ sharingScreen() ? 'Arrêter le partage' : 'Partager écran' }}</small>
+              </button>
+              @if (!inCall()) {
+                <button type="button" class="join-button" (click)="joinCall()" [disabled]="joining()">
+                  {{ joining() ? 'Connexion…' : 'Rejoindre la consultation' }}
+                </button>
+              } @else {
+                <button type="button" class="end-button" (click)="endCall()">
+                  <span aria-hidden="true">call_end</span> Terminer l’appel
+                </button>
               }
             </div>
-            <div class="video-caption">Consultation privée</div>
+            <p class="privacy-note">La vidéo et l’audio sont transmis directement entre les participants. La salle est réservée aux personnes du rendez-vous.</p>
           </div>
 
-          <div class="controls" aria-label="Commandes de l'appel">
-            <button type="button" class="control" (click)="toggleMicrophone()"
-                    [disabled]="!inCall()" [attr.aria-pressed]="microphoneEnabled()"
-                    [attr.aria-label]="microphoneEnabled() ? 'Couper le microphone' : 'Activer le microphone'">
-              <span aria-hidden="true">{{ microphoneEnabled() ? 'mic' : 'mic_off' }}</span>
-              <small>Micro</small>
-            </button>
-            <button type="button" class="control" (click)="toggleCamera()"
-                    [disabled]="!inCall()" [attr.aria-pressed]="cameraEnabled()"
-                    [attr.aria-label]="cameraEnabled() ? 'Couper la caméra' : 'Activer la caméra'">
-              <span aria-hidden="true">{{ cameraEnabled() ? 'videocam' : 'videocam_off' }}</span>
-              <small>Caméra</small>
-            </button>
-            <button type="button" class="control" (click)="toggleScreenShare()"
-                    [disabled]="!inCall()" [attr.aria-pressed]="sharingScreen()">
-              <span aria-hidden="true">present_to_all</span>
-              <small>{{ sharingScreen() ? 'Arrêter le partage' : 'Partager écran' }}</small>
-            </button>
-            @if (!inCall()) {
-              <button type="button" class="join-button" (click)="joinCall()" [disabled]="joining()">
-                {{ joining() ? 'Connexion…' : 'Rejoindre la consultation' }}
-              </button>
-            } @else {
-              <button type="button" class="end-button" (click)="endCall()">
-                <span aria-hidden="true">call_end</span> Terminer l’appel
-              </button>
-            }
-          </div>
-          <p class="privacy-note">La vidéo et l’audio sont transmis directement entre les participants. La salle est réservée aux personnes du rendez-vous.</p>
-        </div>
-
-        <aside class="chat-panel" aria-label="Chat de la consultation">
-          <div class="chat-heading">
-            <div>
-              <h1>Conversation</h1>
-              <p>Messages privés de cette consultation</p>
+          <aside class="medical-panel" aria-label="Panneau médical">
+            <div class="medical-tab-list" role="tablist" aria-label="Onglets médicaux">
+              <button type="button" class="medical-tab" [class.active]="activeMedicalTab() === 'chat'" (click)="activeMedicalTab.set('chat')" role="tab" [attr.aria-selected]="activeMedicalTab() === 'chat'">Chat</button>
+              <button type="button" class="medical-tab" [class.active]="activeMedicalTab() === 'dossier'" (click)="activeMedicalTab.set('dossier')" role="tab" [attr.aria-selected]="activeMedicalTab() === 'dossier'">Dossier</button>
+              <button type="button" class="medical-tab" [class.active]="activeMedicalTab() === 'notes'" (click)="activeMedicalTab.set('notes')" role="tab" [attr.aria-selected]="activeMedicalTab() === 'notes'">Notes</button>
+              <button type="button" class="medical-tab" [class.active]="activeMedicalTab() === 'ordonnance'" (click)="activeMedicalTab.set('ordonnance')" role="tab" [attr.aria-selected]="activeMedicalTab() === 'ordonnance'">Ordonnance</button>
             </div>
-            <span class="chat-lock" aria-label="Conversation protégée">🔒</span>
-          </div>
-          <div class="chat-messages" aria-live="polite" aria-relevant="additions">
-            @if (messages().length === 0) {
-              <p class="empty-chat">Les messages de la consultation apparaîtront ici.</p>
+
+            @switch (activeMedicalTab()) {
+              @case ('chat') {
+                <div class="chat-panel" aria-label="Chat de la consultation">
+                  <div class="chat-heading">
+                    <div>
+                      <h1>Conversation</h1>
+                      <p>Messages privés de cette consultation</p>
+                    </div>
+                    <span class="chat-lock" aria-label="Conversation protégée">🔒</span>
+                  </div>
+                  <div class="chat-messages" aria-live="polite" aria-relevant="additions">
+                    @if (messages().length === 0) {
+                      <p class="empty-chat">Les messages de la consultation apparaîtront ici.</p>
+                    }
+                    @for (message of messages(); track message.id) {
+                      <article class="message" [class.own-message]="message.sender === 'Vous'">
+                        <span>{{ message.sender }}</span>
+                        <p>{{ message.text }}</p>
+                        <time>{{ message.sentAt }}</time>
+                      </article>
+                    }
+                  </div>
+                  <form class="chat-form" (submit)="sendChat($event)">
+                    <label class="visually-hidden" for="doctor-chat-message">Votre message</label>
+                    <input id="doctor-chat-message" type="text" maxlength="2000" autocomplete="off"
+                           placeholder="Écrire un message…" [value]="chatDraft()"
+                           (input)="updateChatDraft($event)" [disabled]="!connected()">
+                    <button type="submit" [disabled]="!connected() || !chatDraft().trim()"
+                            aria-label="Envoyer le message">Envoyer</button>
+                  </form>
+                </div>
+              }
+              @case ('dossier') {
+                <div class="medical-content">
+                  @if (dossierLoading()) {
+                    <div class="medical-loading"><span class="loader"></span><p>Chargement du dossier…</p></div>
+                  } @else if (patientRecord(); as patient) {
+                    <div class="medical-card">
+                      <div class="patient-header">
+                        <div class="patient-avatar-large">{{ patientInitials(patient.email) }}</div>
+                        <div>
+                          <h2>Dossier patient</h2>
+                          <p>{{ patient.email }}</p>
+                        </div>
+                      </div>
+
+                      <div class="detail-grid">
+                        <div class="mini-card">
+                          <span>Identité</span>
+                          <strong>{{ patient.email }}</strong>
+                        </div>
+                        <div class="mini-card">
+                          <span>Consultations</span>
+                          <strong>{{ patient.consultationHistory.length }}</strong>
+                        </div>
+                        <div class="mini-card">
+                          <span>Historique</span>
+                          <strong>{{ patient.appointmentHistory.length }} rendez-vous</strong>
+                        </div>
+                      </div>
+
+                      <div class="medical-section">
+                        <h3>Informations médicales</h3>
+                        <div class="alert-list">
+                          <span class="alert-pill danger">Allergies / antécédents</span>
+                          <span class="alert-pill">Traitements</span>
+                        </div>
+                        <p>{{ patient.medicalRecord || 'Aucune information médicale enregistrée pour ce patient.' }}</p>
+                      </div>
+
+                      <div class="medical-section">
+                        <h3>Historique des consultations</h3>
+                        @if (patient.consultationHistory.length) {
+                          @for (consultation of patient.consultationHistory; track consultation.appointmentId) {
+                            <article class="history-item">
+                              <strong>{{ consultation.scheduledAt | date:'d MMM y':'UTC':'fr' }}</strong>
+                              @if (consultation.report) { <p><b>Compte rendu</b><br>{{ consultation.report }}</p> }
+                              @if (consultation.observations) { <p><b>Observations</b><br>{{ consultation.observations }}</p> }
+                              @if (consultation.diagnosis) { <p><b>Diagnostic</b><br>{{ consultation.diagnosis }}</p> }
+                            </article>
+                          }
+                        } @else {
+                          <p class="muted">Aucune consultation antérieure enregistrée.</p>
+                        }
+                      </div>
+                    </div>
+                  } @else {
+                    <div class="medical-empty-state">
+                      <span class="material-icons">folder_shared</span>
+                      <h2>Dossier patient</h2>
+                      <p>Le dossier s’affichera ici une fois le rendez-vous et le patient identifiés.</p>
+                    </div>
+                  }
+                </div>
+              }
+              @case ('notes') {
+                <div class="medical-content">
+                  @if (notesLoading()) {
+                    <div class="medical-loading"><span class="loader"></span><p>Chargement du compte-rendu…</p></div>
+                  } @else {
+                    <div class="medical-card">
+                      <div class="editor-header">
+                        <h2>Notes de consultation</h2>
+                        <span class="save-pill" [class.saved]="noteSaved()">
+                          <span class="status-dot" [class.connected]="noteSaved()"></span>
+                          {{ noteSaved() ? 'Enregistré' : 'En cours…' }}
+                        </span>
+                      </div>
+
+                      <div class="field-group">
+                        <label>Motif de consultation</label>
+                        <input type="text" [(ngModel)]="consultationReason" placeholder="Ex. : Suivi post-rééducation, douleurs persistantes..." />
+                      </div>
+
+                      <div class="field-group">
+                        <label>Notes privées</label>
+                        <textarea rows="5" [(ngModel)]="privateNotes" (ngModelChange)="scheduleConsultationSave()" placeholder="Observations, allergies signalées, contexte clinique…"></textarea>
+                      </div>
+
+                      <div class="field-group">
+                        <label>Compte-rendu partagé</label>
+                        <textarea rows="5" [(ngModel)]="sharedNotes" (ngModelChange)="scheduleConsultationSave()" placeholder="Résumé clair pour le patient…"></textarea>
+                      </div>
+
+                      <div class="field-group">
+                        <label>Diagnostic</label>
+                        <textarea rows="4" [(ngModel)]="diagnosis" (ngModelChange)="scheduleConsultationSave()" placeholder="Diagnostic retenu et conduite à tenir…"></textarea>
+                      </div>
+
+                      <div class="editor-actions">
+                        <button type="button" (click)="saveConsultationNotes()" [disabled]="savingConsultationNotes()">
+                          {{ savingConsultationNotes() ? 'Enregistrement…' : 'Enregistrer maintenant' }}
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+              @case ('ordonnance') {
+                <div class="medical-content">
+                  @if (prescriptionLoading()) {
+                    <div class="medical-loading"><span class="loader"></span><p>Chargement de l’ordonnance…</p></div>
+                  } @else {
+                    <div class="medical-card">
+                      <div class="editor-header">
+                        <h2>Ordonnance</h2>
+                        <span class="save-pill" [class.saved]="prescriptionSaved()">
+                          <span class="status-dot" [class.connected]="prescriptionSaved()"></span>
+                          {{ prescriptionSaved() ? 'Enregistrée' : 'Brouillon' }}
+                        </span>
+                      </div>
+
+                      <div class="field-group">
+                        <label>Lignes de médicaments</label>
+                        <textarea rows="10" [(ngModel)]="prescriptionText" (ngModelChange)="schedulePrescriptionSave()" placeholder="Un médicament par ligne :&#10;Paracétamol 1 g - 1 comprimé - 2 fois/jour - 5 jours&#10;Amoxicilline 500 mg - 1 comprimé - 3 fois/jour - 7 jours"></textarea>
+                      </div>
+
+                      <div class="editor-actions">
+                        <button type="button" class="secondary-btn" (click)="savePrescriptionDraft()" [disabled]="savingPrescription() || !prescriptionText.trim()">
+                          {{ savingPrescription() ? 'Enregistrement…' : 'Enregistrer le brouillon' }}
+                        </button>
+                        <button type="button" (click)="validatePrescriptionDraft()" [disabled]="savingPrescription() || !prescriptionText.trim()">
+                          Valider l’ordonnance
+                        </button>
+                        <button type="button" class="secondary-btn" (click)="previewPrescriptionPdf()" [disabled]="!prescriptionRecord || savingPrescription()">
+                          Aperçu PDF
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
             }
-            @for (message of messages(); track message.id) {
-              <article class="message" [class.own-message]="message.sender === 'Vous'">
-                <span>{{ message.sender }}</span>
-                <p>{{ message.text }}</p>
-                <time>{{ message.sentAt }}</time>
-              </article>
-            }
+          </aside>
+        </section>
+      } @else {
+        <section class="call-layout patient-call-layout" aria-label="Salle de téléconsultation">
+          <div class="video-column">
+            <div class="video-stage">
+              <video #remoteVideo autoplay playsinline aria-label="Vidéo du participant"></video>
+              @if (!remoteStream()) {
+                <div class="video-placeholder">
+                  <span class="avatar" aria-hidden="true">CS</span>
+                  <p>{{ connected() ? 'En attente de l’autre participant…' : 'Votre consultation vidéo' }}</p>
+                </div>
+              }
+              <div class="local-video">
+                <video #localVideo autoplay muted playsinline aria-label="Aperçu de votre caméra"></video>
+                @if (!cameraEnabled()) {
+                  <span class="muted-overlay">Caméra désactivée</span>
+                }
+              </div>
+              <div class="video-caption">Consultation privée</div>
+            </div>
+
+            <div class="controls" aria-label="Commandes de l'appel">
+              <button type="button" class="control" (click)="toggleMicrophone()"
+                      [disabled]="!inCall()" [attr.aria-pressed]="microphoneEnabled()"
+                      [attr.aria-label]="microphoneEnabled() ? 'Couper le microphone' : 'Activer le microphone'">
+                <span aria-hidden="true">{{ microphoneEnabled() ? 'mic' : 'mic_off' }}</span>
+                <small>Micro</small>
+              </button>
+              <button type="button" class="control" (click)="toggleCamera()"
+                      [disabled]="!inCall()" [attr.aria-pressed]="cameraEnabled()"
+                      [attr.aria-label]="cameraEnabled() ? 'Couper la caméra' : 'Activer la caméra'">
+                <span aria-hidden="true">{{ cameraEnabled() ? 'videocam' : 'videocam_off' }}</span>
+                <small>Caméra</small>
+              </button>
+              <button type="button" class="control" (click)="toggleScreenShare()"
+                      [disabled]="!inCall()" [attr.aria-pressed]="sharingScreen()">
+                <span aria-hidden="true">present_to_all</span>
+                <small>{{ sharingScreen() ? 'Arrêter le partage' : 'Partager écran' }}</small>
+              </button>
+              @if (!inCall()) {
+                <button type="button" class="join-button" (click)="joinCall()" [disabled]="joining()">
+                  {{ joining() ? 'Connexion…' : 'Rejoindre la consultation' }}
+                </button>
+              } @else {
+                <button type="button" class="end-button" (click)="endCall()">
+                  <span aria-hidden="true">call_end</span> Terminer l’appel
+                </button>
+              }
+            </div>
+            <p class="privacy-note">La vidéo et l’audio sont transmis directement entre les participants. La salle est réservée aux personnes du rendez-vous.</p>
           </div>
-          <form class="chat-form" (submit)="sendChat($event)">
-            <label class="visually-hidden" for="chat-message">Votre message</label>
-            <input id="chat-message" type="text" maxlength="2000" autocomplete="off"
-                   placeholder="Écrire un message…" [value]="chatDraft()"
-                   (input)="updateChatDraft($event)" [disabled]="!connected()">
-            <button type="submit" [disabled]="!connected() || !chatDraft().trim()"
-                    aria-label="Envoyer le message">Envoyer</button>
-          </form>
-        </aside>
-      </section>
+
+          <aside class="chat-panel" aria-label="Chat de la consultation">
+            <div class="chat-heading">
+              <div>
+                <h1>Conversation</h1>
+                <p>Messages privés de cette consultation</p>
+              </div>
+              <span class="chat-lock" aria-label="Conversation protégée">🔒</span>
+            </div>
+            <div class="chat-messages" aria-live="polite" aria-relevant="additions">
+              @if (messages().length === 0) {
+                <p class="empty-chat">Les messages de la consultation apparaîtront ici.</p>
+              }
+              @for (message of messages(); track message.id) {
+                <article class="message" [class.own-message]="message.sender === 'Vous'">
+                  <span>{{ message.sender }}</span>
+                  <p>{{ message.text }}</p>
+                  <time>{{ message.sentAt }}</time>
+                </article>
+              }
+            </div>
+            <form class="chat-form" (submit)="sendChat($event)">
+              <label class="visually-hidden" for="chat-message">Votre message</label>
+              <input id="chat-message" type="text" maxlength="2000" autocomplete="off"
+                     placeholder="Écrire un message…" [value]="chatDraft()"
+                     (input)="updateChatDraft($event)" [disabled]="!connected()">
+              <button type="submit" [disabled]="!connected() || !chatDraft().trim()"
+                      aria-label="Envoyer le message">Envoyer</button>
+            </form>
+          </aside>
+        </section>
+      }
     </main>
   `,
   styles: [`
@@ -155,6 +397,45 @@ interface ChatMessage {
     .join-button:disabled { opacity: .6; cursor: wait; }
     .privacy-note { margin: 12px 0; color: #70818a; text-align: center; font-size: 12px; }
     .chat-panel { display: flex; min-height: 490px; flex-direction: column; overflow: hidden; border: 1px solid #dfe9ea; border-radius: 20px; background: white; }
+    .medical-panel { display: flex; min-height: 490px; flex-direction: column; overflow: hidden; border: 1px solid #dfe9ea; border-radius: 20px; background: white; }
+    .medical-tab-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 16px 0; border-bottom: 1px solid #e8eeee; background: #fbfdfd; }
+    .medical-tab { border: 1px solid #d6e4e4; border-radius: 999px; padding: 9px 12px; background: white; color: #46636a; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .medical-tab.active { border-color: #087e75; background: #e5f6f4; color: #087e75; }
+    .medical-empty-state { display: grid; place-items: center; gap: 10px; min-height: 260px; padding: 28px 24px; text-align: center; color: #56707a; }
+    .medical-empty-state .material-icons { font-size: 40px; color: #087e75; }
+    .medical-empty-state h2 { margin: 0; font-size: 20px; color: #1d3e49; }
+    .medical-empty-state p { max-width: 320px; margin: 0; line-height: 1.6; }
+    .medical-content { padding: 16px; }
+    .medical-card { display: grid; gap: 18px; }
+    .patient-header { display: flex; align-items: center; gap: 14px; padding: 10px 0 4px; }
+    .patient-avatar-large { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 16px; background: #dff5f1; color: #0a7c73; font-weight: 700; }
+    .patient-header h2 { margin: 0; }
+    .patient-header p { margin: 4px 0 0; color: #60787d; }
+    .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .mini-card { display: grid; gap: 6px; border: 1px solid #e2eeed; border-radius: 12px; padding: 12px; background: white; }
+    .mini-card span { color: #6f858b; font-size: 11px; }
+    .mini-card strong { color: #1f3d46; font-size: 13px; }
+    .medical-section { display: grid; gap: 10px; }
+    .medical-section h3 { margin: 0; color: #1f3d46; font-size: 15px; }
+    .alert-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .alert-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 7px 10px; background: #edf5f3; color: #286d6b; font-size: 11px; font-weight: 600; }
+    .alert-pill.danger { background: #fbe9e7; color: #a44941; }
+    .history-item { border: 1px solid #e5efee; border-radius: 12px; padding: 12px; background: white; }
+    .history-item strong { color: #1d3d47; }
+    .history-item p { margin: 8px 0 0; color: #526d74; line-height: 1.6; }
+    .muted { color: #71858b; font-size: 12px; }
+    .editor-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .editor-header h2 { margin: 0; font-size: 18px; }
+    .save-pill { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 7px 10px; background: #eef4f5; color: #4d686e; font-size: 11px; font-weight: 700; }
+    .save-pill.saved { background: #e4f7ef; color: #116d61; }
+    .field-group { display: grid; gap: 8px; }
+    .field-group label { color: #445d64; font-size: 12px; font-weight: 650; }
+    .field-group input, .field-group textarea { border: 1px solid #dfeae8; border-radius: 10px; padding: 11px 12px; background: white; color: #1d363d; font: inherit; resize: vertical; }
+    .editor-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .editor-actions button { border: 0; border-radius: 10px; padding: 10px 16px; background: #087e75; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+    .editor-actions button:disabled { opacity: .6; cursor: not-allowed; }
+    .editor-actions .secondary-btn { background: #edf5f3; color: #0d6f66; }
+    .medical-loading { display: grid; place-items: center; gap: 10px; min-height: 200px; color: #597179; }
     .chat-heading { display: flex; align-items: center; justify-content: space-between; padding: 20px; border-bottom: 1px solid #e8eeee; }
     .chat-heading h1 { margin: 0; font-size: 17px; }
     .chat-heading p { margin: 5px 0 0; color: #75858b; font-size: 12px; }
@@ -172,7 +453,7 @@ interface ChatMessage {
     .chat-form button:disabled { opacity: .5; cursor: not-allowed; }
     .error-banner { margin: 16px 0 0; border-radius: 10px; padding: 12px 16px; background: #fff0ef; color: #963b36; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
-    @media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } .chat-panel { min-height: 360px; } }
+    @media (max-width: 900px) { .call-layout { grid-template-columns: 1fr; } .chat-panel, .medical-panel { min-height: 360px; } }
     @media (max-width: 600px) { .call-shell { padding: 0 12px 20px; } .call-header { min-height: 66px; } .video-stage { min-height: 260px; border-radius: 15px; } .local-video { width: 32%; right: 10px; bottom: 10px; } .video-caption { left: 10px; bottom: 10px; } .controls { gap: 7px; } .control { min-width: 62px; padding: 8px 5px; } .join-button, .end-button { min-height: 44px; padding: 0 13px; } }
     @media (prefers-color-scheme: dark) { :host { background: #101c22; color: #e1ebed; } .call-header { border-color: #293b42; } .brand { color: #e1ebed; } .brand small, .call-status, .privacy-note { color: #a0b2b8; } .chat-panel, .control { background: #19292f; border-color: #304249; } .chat-heading, .chat-form { border-color: #304249; } .chat-heading p, .empty-chat { color: #a0b2b8; } .message { background: #26383e; } .message.own-message { background: #17453e; } .message > span { color: #b7cfcb; } .chat-form input { border-color: #40535a; background: #142229; color: #e1ebed; } }
   `]
@@ -193,19 +474,44 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
   readonly remoteStream = signal<MediaStream | null>(null);
   readonly messages = signal<ChatMessage[]>([]);
   readonly chatDraft = signal('');
+  readonly doctorMode = signal(false);
+  readonly activeMedicalTab = signal<'chat' | 'dossier' | 'notes' | 'ordonnance'>('chat');
+  readonly patientRecord = signal<DoctorPatientDetail | null>(null);
+  readonly dossierLoading = signal(false);
+  readonly notesLoading = signal(false);
+  readonly prescriptionLoading = signal(false);
+  readonly noteSaved = signal(false);
+  readonly savingConsultationNotes = signal(false);
+  readonly prescriptionRecord = signal<Prescription | null>(null);
+  readonly prescriptionSaved = signal(false);
+  readonly savingPrescription = signal(false);
+
+  consultationReason = '';
+  privateNotes = '';
+  sharedNotes = '';
+  diagnosis = '';
+  prescriptionText = '';
 
   private appointmentId = '';
   private userId = '';
+  private remotePeerId = '';
   private client?: Client;
   private subscription?: StompSubscription;
   private peerConnection?: RTCPeerConnection;
   private screenStream?: MediaStream;
   private readonly pendingCandidates: RTCIceCandidateInit[] = [];
   private nextMessageId = 0;
+  private makingOffer = false;
+  private ignoreOffer = false;
+  private settingRemoteAnswer = false;
+  private consultationAutoSaveTimer?: number;
+  private prescriptionAutoSaveTimer?: number;
 
   constructor(
     private readonly route: ActivatedRoute,
     private readonly tokenStore: AccessTokenStore,
+    private readonly auth: AuthService,
+    private readonly api: TelemedApiService,
     @Inject(TELEMED_API_BASE_URL) private readonly apiBaseUrl: string,
     @Inject(TELEMED_ICE_SERVERS) private readonly iceServers: RTCIceServer[]
   ) {}
@@ -222,12 +528,230 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       this.status.set('Authentification requise');
       return;
     }
+    const roles = this.auth.claims()?.roles ?? [];
+    this.doctorMode.set(roles.includes('DOCTOR'));
     this.userId = this.readUserId(token);
+    if (this.doctorMode()) {
+      void this.loadDoctorMedicalData();
+    }
   }
 
   ngOnDestroy(): void {
+    this.publishLeave();
     this.cleanupMedia();
     void this.client?.deactivate();
+    if (this.consultationAutoSaveTimer) {
+      window.clearTimeout(this.consultationAutoSaveTimer);
+    }
+    if (this.prescriptionAutoSaveTimer) {
+      window.clearTimeout(this.prescriptionAutoSaveTimer);
+    }
+  }
+
+  private async loadDoctorMedicalData(): Promise<void> {
+    if (!this.doctorMode()) {
+      return;
+    }
+    this.dossierLoading.set(true);
+    this.notesLoading.set(true);
+    this.prescriptionLoading.set(true);
+    try {
+      const appointments = await firstValueFrom(this.api.doctorAppointments());
+      const appointment = appointments.find(item => item.id === this.appointmentId);
+      if (!appointment) {
+        this.error.set('Le rendez-vous médical n’a pas été retrouvé pour ce médecin.');
+        return;
+      }
+      const patient = await firstValueFrom(this.api.doctorPatient(appointment.patientId));
+      this.patientRecord.set(patient);
+
+      const consultation = await firstValueFrom(this.api.doctorConsultation(this.appointmentId));
+      if (consultation) {
+        this.privateNotes = consultation.observations ?? '';
+        this.sharedNotes = consultation.report ?? '';
+        this.diagnosis = consultation.diagnosis ?? '';
+        this.consultationReason = consultation.report?.split(/\s+/).slice(0, 12).join(' ') || '';
+      } else {
+        this.privateNotes = '';
+        this.sharedNotes = '';
+        this.diagnosis = '';
+        this.consultationReason = '';
+      }
+      this.noteSaved.set(true);
+
+      const prescription = await firstValueFrom(this.api.doctorPrescription(this.appointmentId));
+      if (prescription) {
+        this.prescriptionRecord.set(prescription);
+        this.prescriptionText = prescription.content;
+        this.prescriptionSaved.set(prescription.status === 'VALIDATED');
+      } else {
+        this.prescriptionRecord.set(null);
+        this.prescriptionText = '';
+        this.prescriptionSaved.set(false);
+      }
+    } catch {
+      this.error.set('Impossible de charger le dossier médical et les notes de cette consultation.');
+    } finally {
+      this.dossierLoading.set(false);
+      this.notesLoading.set(false);
+      this.prescriptionLoading.set(false);
+    }
+  }
+
+  scheduleConsultationSave(): void {
+    if (!this.doctorMode()) {
+      return;
+    }
+    this.noteSaved.set(false);
+    window.clearTimeout(this.consultationAutoSaveTimer);
+    this.consultationAutoSaveTimer = window.setTimeout(() => {
+      void this.saveConsultationNotes();
+    }, 900);
+  }
+
+  saveConsultationNotes(): Promise<void> {
+    if (!this.doctorMode()) {
+      return Promise.resolve();
+    }
+    const payload = {
+      report: this.sharedNotes.trim() || null,
+      observations: this.privateNotes.trim() || null,
+      diagnosis: this.diagnosis.trim() || null,
+      finalized: false
+    };
+    this.savingConsultationNotes.set(true);
+    return firstValueFrom(this.api.saveDoctorConsultation(this.appointmentId, payload))
+      .then(consultation => {
+        this.noteSaved.set(true);
+        this.consultationReason = consultation.report?.trim() || this.consultationReason || '';
+        this.status.set('Compte-rendu enregistré');
+      })
+      .catch(() => {
+        this.noteSaved.set(false);
+        this.error.set('La sauvegarde du compte-rendu a échoué.');
+      })
+      .finally(() => {
+        this.savingConsultationNotes.set(false);
+      });
+  }
+
+  schedulePrescriptionSave(): void {
+    if (!this.doctorMode()) {
+      return;
+    }
+    const current = this.prescriptionRecord();
+    if (current && current.status !== 'DRAFT') {
+      this.prescriptionSaved.set(true);
+      this.status.set('Ordonnance déjà validée — modification désactivée.');
+      return;
+    }
+    this.prescriptionSaved.set(false);
+    window.clearTimeout(this.prescriptionAutoSaveTimer);
+    this.prescriptionAutoSaveTimer = window.setTimeout(() => {
+      void this.savePrescriptionDraft();
+    }, 900);
+  }
+
+  savePrescriptionDraft(): Promise<void> {
+    if (!this.doctorMode() || !this.prescriptionText.trim()) {
+      return Promise.resolve();
+    }
+    const existing = this.prescriptionRecord();
+    if (existing && existing.status !== 'DRAFT') {
+      this.prescriptionSaved.set(true);
+      return Promise.resolve();
+    }
+    this.savingPrescription.set(true);
+    const request = firstValueFrom(existing
+      ? this.api.updateDoctorPrescription(existing.id, this.prescriptionText.trim())
+      : this.api.createDoctorPrescription(this.appointmentId, this.prescriptionText.trim()));
+    return request.then(updated => {
+      this.prescriptionRecord.set(updated);
+      this.prescriptionSaved.set(updated.status === 'VALIDATED');
+      this.status.set('Ordonnance enregistrée');
+    }).catch(error => {
+      const backendMessage = error instanceof HttpErrorResponse && typeof error.error?.message === 'string'
+        ? error.error.message
+        : undefined;
+      this.error.set(backendMessage || (error instanceof HttpErrorResponse && error.status === 400
+        ? 'L’ordonnance ne peut pas être enregistrée dans l’état actuel du rendez-vous.'
+        : 'L’enregistrement de l’ordonnance a échoué.'));
+    }).finally(() => {
+      this.savingPrescription.set(false);
+    });
+  }
+
+  validatePrescriptionDraft(): void {
+    const current = this.prescriptionRecord();
+    if (!this.doctorMode() || !this.prescriptionText.trim()) {
+      return;
+    }
+    if (current && current.status === 'VALIDATED') {
+      this.prescriptionSaved.set(true);
+      this.status.set('Ordonnance déjà validée.');
+      return;
+    }
+    if (!current) {
+      void this.savePrescriptionDraft().then(() => this.validatePrescriptionDraft());
+      return;
+    }
+    if (this.savingPrescription()) {
+      return;
+    }
+    this.savingPrescription.set(true);
+    this.api.validateDoctorPrescription(current.id).subscribe({
+      next: updated => {
+        this.prescriptionRecord.set(updated);
+        this.prescriptionSaved.set(true);
+        this.status.set('Ordonnance validée et disponible pour le patient');
+        this.prescriptionText = updated.content;
+        this.savingPrescription.set(false);
+      },
+      error: error => {
+        this.savingPrescription.set(false);
+        const backendMessage = error instanceof HttpErrorResponse && typeof error.error?.message === 'string'
+          ? error.error.message
+          : undefined;
+        this.error.set(backendMessage || 'La validation de l’ordonnance a échoué.');
+      }
+    });
+  }
+
+  previewPrescriptionPdf(): void {
+    const current = this.prescriptionRecord();
+    if (!current) {
+      this.error.set('Enregistrez d’abord l’ordonnance pour générer le PDF.');
+      return;
+    }
+    if (current.status !== 'VALIDATED') {
+      this.error.set('Validez d’abord l’ordonnance pour générer le PDF.');
+      return;
+    }
+    this.api.doctorPrescriptionPdf(current.id).subscribe({
+      next: blob => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `ordonnance-${current.id}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      error: () => this.error.set('Le PDF de l’ordonnance n’a pas pu être généré.')
+    });
+  }
+
+  patientInitials(value: string | null | undefined): string {
+    if (!value) {
+      return 'P';
+    }
+    const seed = value.replace(/[^a-zA-Z0-9]/g, ' ').trim();
+    const words = seed.split(/\s+/).filter(Boolean).slice(0, 2);
+    if (words.length === 0) {
+      return 'P';
+    }
+    return words.map(word => word.charAt(0).toUpperCase()).join('').slice(0, 2);
   }
 
   async joinCall(): Promise<void> {
@@ -238,8 +762,10 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
     }
     this.error.set('');
     this.joining.set(true);
-    this.status.set('Activation de la caméra et du microphone…');
+    this.status.set('Vérification du rendez-vous…');
     try {
+      await firstValueFrom(this.api.checkTeleconsultationAccess(this.appointmentId));
+      this.status.set('Activation de la caméra et du microphone…');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       this.localStream.set(stream);
       this.cameraEnabled.set(true);
@@ -249,11 +775,22 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       await this.connectSignaling(token);
       this.inCall.set(true);
       this.status.set('En attente de l’autre participant');
-    } catch {
+    } catch (error) {
       await this.client?.deactivate();
       this.client = undefined;
       this.cleanupMedia();
-      this.error.set('Impossible de rejoindre la salle. Vérifiez les autorisations caméra/micro et réessayez pendant le rendez-vous.');
+      if (error instanceof HttpErrorResponse && (error.status === 403 || error.status === 404)) {
+        const message = error.error && typeof error.error.message === 'string'
+          ? error.error.message
+          : 'Ce compte n’est pas autorisé à rejoindre cette téléconsultation.';
+        this.error.set(`Accès refusé : ${message}`);
+      } else if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        this.error.set('Autorisez l’accès à la caméra et au microphone, puis réessayez.');
+      } else if (error instanceof DOMException && error.name === 'NotFoundError') {
+        this.error.set('Aucune caméra ou aucun microphone compatible n’a été détecté.');
+      } else {
+        this.error.set('Impossible de rejoindre la salle. Vérifiez les autorisations caméra/micro et la connexion au serveur.');
+      }
       this.status.set('Connexion impossible');
     } finally {
       this.joining.set(false);
@@ -289,6 +826,8 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       this.sharingScreen.set(true);
       screenTrack.onended = () => this.restoreCameraTrack();
     } catch {
+      this.screenStream?.getTracks().forEach(track => track.stop());
+      this.screenStream = undefined;
       this.error.set('Le partage d’écran n’a pas pu démarrer.');
     }
   }
@@ -299,7 +838,9 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
     if (!text || text.length > 2000 || !this.connected()) {
       return;
     }
-    this.publishSignal('CHAT', text);
+    if (!this.publishSignal('CHAT', text)) {
+      return;
+    }
     this.addMessage('Vous', text);
     this.chatDraft.set('');
   }
@@ -309,9 +850,7 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
   }
 
   async endCall(): Promise<void> {
-    if (this.connected() && this.client?.active) {
-      this.client.publish({ destination: `/app/teleconsultations/${this.appointmentId}/leave`, body: '{}' });
-    }
+    this.publishLeave();
     this.cleanupMedia();
     this.inCall.set(false);
     this.connected.set(false);
@@ -321,8 +860,6 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
   }
 
   private async connectSignaling(token: string): Promise<void> {
-    const brokerUrl = new URL('/ws', 'http://localhost:8080');
-    brokerUrl.protocol = brokerUrl.protocol === 'https:' ? 'wss:' : 'ws:';
     this.client = new Client({
       brokerURL: this.websocketUrl(),
       connectHeaders: { Authorization: `Bearer ${token}` },
@@ -406,14 +943,16 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       this.error.set('Un message de signalisation invalide a été reçu.');
       return;
     }
-    if (event.senderId === this.userId) {
+    if (event.appointmentId !== this.appointmentId || event.senderId === this.userId) {
       return;
     }
     if (event.type === 'JOIN') {
+      this.remotePeerId = event.senderId;
       this.status.set('L’autre participant a rejoint');
-      if (this.userId.localeCompare(event.senderId) < 0) {
-        void this.createOffer();
+      if (!this.peerConnection && this.localStream()) {
+        this.createPeerConnection();
       }
+      void this.createOffer();
     } else if (event.type === 'LEAVE') {
       this.status.set('L’autre participant a quitté la salle');
       this.remoteStream.set(null);
@@ -422,6 +961,11 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       }
       this.peerConnection?.close();
       this.peerConnection = undefined;
+      this.remotePeerId = '';
+      this.pendingCandidates.length = 0;
+      this.makingOffer = false;
+      this.ignoreOffer = false;
+      this.settingRemoteAnswer = false;
     } else if (event.type === 'OFFER') {
       void this.receiveOffer(event.payload as RTCSessionDescriptionInit);
     } else if (event.type === 'ANSWER') {
@@ -438,11 +982,14 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       return;
     }
     try {
+      this.makingOffer = true;
       const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
       this.publishSignal('OFFER', this.peerConnection.localDescription?.toJSON());
     } catch {
       this.error.set('Impossible de démarrer la connexion vidéo.');
+    } finally {
+      this.makingOffer = false;
     }
   }
 
@@ -451,6 +998,16 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       return;
     }
     try {
+      const connection = this.peerConnection;
+      const offerCollision = this.makingOffer
+        || (connection.signalingState !== 'stable' && !this.settingRemoteAnswer);
+      this.ignoreOffer = !this.isPolitePeer() && offerCollision;
+      if (this.ignoreOffer) {
+        return;
+      }
+      if (offerCollision) {
+        await connection.setLocalDescription({ type: 'rollback' });
+      }
       await this.peerConnection.setRemoteDescription(offer);
       await this.flushCandidates();
       const answer = await this.peerConnection.createAnswer();
@@ -466,15 +1023,21 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
       return;
     }
     try {
+      this.settingRemoteAnswer = true;
       await this.peerConnection.setRemoteDescription(answer);
       await this.flushCandidates();
     } catch {
       this.error.set('La réponse vidéo est invalide.');
+    } finally {
+      this.settingRemoteAnswer = false;
     }
   }
 
   private async receiveCandidate(candidate: RTCIceCandidateInit): Promise<void> {
     if (!this.peerConnection || !candidate) {
+      return;
+    }
+    if (this.ignoreOffer) {
       return;
     }
     if (!this.peerConnection.remoteDescription) {
@@ -498,34 +1061,47 @@ export class TeleconsultationComponent implements OnInit, OnDestroy {
     }
   }
 
-  private publishSignal(type: string, payload?: unknown): void {
+  private publishSignal(type: string, payload?: unknown): boolean {
     if (!this.connected() || !this.client?.active) {
-      return;
+      return false;
     }
     this.client.publish({
       destination: `/app/teleconsultations/${this.appointmentId}/signal`,
       body: JSON.stringify({ type, payload: payload ?? null })
     });
+    return true;
+  }
+
+  private publishLeave(): void {
+    if (this.connected() && this.client?.active) {
+      this.client.publish({ destination: `/app/teleconsultations/${this.appointmentId}/leave`, body: '{}' });
+    }
   }
 
   private restoreCameraTrack(): void {
     const cameraTrack = this.localStream()?.getVideoTracks()[0];
     const videoSender = this.peerConnection?.getSenders().find(sender => sender.track?.kind === 'video');
     if (cameraTrack && videoSender) {
-      void videoSender.replaceTrack(cameraTrack);
+      void videoSender.replaceTrack(cameraTrack).catch(() => {
+        this.error.set('La caméra n’a pas pu reprendre après le partage d’écran.');
+      });
     }
     this.screenStream?.getTracks().forEach(track => track.stop());
     this.screenStream = undefined;
     this.sharingScreen.set(false);
   }
 
+  private isPolitePeer(): boolean {
+    return this.userId.localeCompare(this.remotePeerId) > 0;
+  }
+
   private addMessage(sender: ChatMessage['sender'], text: string): void {
     this.messages.update(messages => [...messages, {
-      id: this.nextMessageId++,
-      sender,
-      text,
-      sentAt: new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(new Date())
-    }]);
+        id: this.nextMessageId++,
+        sender,
+        text,
+        sentAt: new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(new Date())
+      }].slice(-200));
   }
 
   private bindVideoElements(): void {

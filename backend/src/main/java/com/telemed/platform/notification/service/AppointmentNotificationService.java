@@ -156,21 +156,30 @@ public class AppointmentNotificationService {
             case APPOINTMENT_RESCHEDULED -> "Votre rendez-vous a été replanifié";
             case DOCTOR_APPOINTMENT_NOTICE -> "Mise à jour de votre agenda ClairSanté";
             case APPOINTMENT_CONFIRMATION -> "Confirmation de votre rendez-vous";
+            case DOCTOR_APPROVED -> "Votre compte médecin a été validé";
+            case DOCTOR_REJECTED -> "Votre demande de compte médecin a été refusée";
+            case DOCTOR_SUSPENDED -> "Votre compte médecin a été suspendu";
+            case DOCTOR_REACTIVATED -> "Votre compte médecin a été réactivé";
         });
-        String formattedTime = notification.getAppointmentAt()
-                .atZone(appointmentZone)
-                .format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM 'à' HH:mm", java.util.Locale.FRENCH));
-        message.setText(switch (notification.getType()) {
-            case APPOINTMENT_REMINDER ->
-                    "Bonjour,\n\nNous vous rappelons votre rendez-vous prévu " + formattedTime + ".\n\nÀ bientôt.";
-            case APPOINTMENT_RESCHEDULED ->
-                    "Bonjour,\n\nVotre rendez-vous a été replanifié au " + formattedTime + ".\n\nÀ bientôt.";
-            case DOCTOR_APPOINTMENT_NOTICE ->
-                    "Bonjour,\n\nUn événement a mis à jour votre agenda ClairSanté pour le "
-                            + formattedTime + ". Consultez votre espace médecin.";
-            case APPOINTMENT_CONFIRMATION ->
-                    "Bonjour,\n\nVotre rendez-vous du " + formattedTime + " a bien été enregistré.\n\nÀ bientôt.";
-        });
+        if (notification.getMessageBody() != null) {
+            message.setText(notification.getMessageBody());
+        } else {
+            String formattedTime = notification.getAppointmentAt()
+                    .atZone(appointmentZone)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM 'à' HH:mm", java.util.Locale.FRENCH));
+            message.setText(switch (notification.getType()) {
+                case APPOINTMENT_REMINDER ->
+                        "Bonjour,\n\nNous vous rappelons votre rendez-vous prévu " + formattedTime + ".\n\nÀ bientôt.";
+                case APPOINTMENT_RESCHEDULED ->
+                        "Bonjour,\n\nVotre rendez-vous a été replanifié au " + formattedTime + ".\n\nÀ bientôt.";
+                case DOCTOR_APPOINTMENT_NOTICE ->
+                        "Bonjour,\n\nUn événement a mis à jour votre agenda ClairSanté pour le "
+                                + formattedTime + ". Consultez votre espace médecin.";
+                case APPOINTMENT_CONFIRMATION ->
+                        "Bonjour,\n\nVotre rendez-vous du " + formattedTime + " a bien été enregistré.\n\nÀ bientôt.";
+                default -> "Bonjour,\n\nVous recevez ce message de ClairSanté.";
+            });
+        }
         mailSender.send(message);
     }
 

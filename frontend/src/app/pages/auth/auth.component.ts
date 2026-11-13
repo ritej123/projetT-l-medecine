@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+﻿import { Component, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
@@ -50,25 +50,77 @@ import { AuthService } from '../../core/auth.service';
               <span class="material-icons" aria-hidden="true">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span>
             </button>
           </div>
-
+          @if (!registering()) {
+            <label for="captchaText">Entrez le code</label>
+            <div class="captcha-row">
+              @if (captchaImage()) {
+                <img [src]="captchaImage()" width="200" height="70" alt="Image de vérification à recopier en majuscules">
+              } @else {
+                <div class="captcha-placeholder" role="status">
+                  {{ captchaLoading() ? 'Chargement du code…' : 'Image indisponible' }}
+                </div>
+              }
+              <button type="button" class="captcha-refresh" (click)="refreshCaptcha()" [disabled]="captchaLoading()"
+                      aria-label="Actualiser le CAPTCHA">
+                <span aria-hidden="true">↻</span><span>Actualiser</span>
+              </button>
+            </div>
+            <p class="captcha-help" id="captchaHelp">Saisissez les lettres visibles. Si l’image est difficile à lire, actualisez-la.</p>
+            <input id="captchaText" name="captchaText" type="text" [(ngModel)]="captchaText"
+                   autocomplete="off" autocapitalize="characters" spellcheck="false"
+                   aria-describedby="captchaHelp" maxlength="6" required>
+          }
           @if (registering()) {
-            @if (accountType === 'DOCTOR') {
-              <label for="specialty">Spécialité médicale</label>
-              <input id="specialty" name="specialty" type="text" [(ngModel)]="specialty"
-                     maxlength="120" required placeholder="Ex. Médecine générale">
-              <label for="bio">Présentation professionnelle</label>
-              <textarea id="bio" name="bio" [(ngModel)]="bio" maxlength="4000"
-                        placeholder="Présentez brièvement votre expérience et votre pratique"></textarea>
-              <p class="privacy">Votre demande sera vérifiée par l’administration. Vous pourrez vous connecter à l’espace médecin après son approbation.</p>
-            } @else {
-              <p class="privacy">Votre inscription crée un compte patient et vous donne accès à votre espace personnel.</p>
-            }
             <label for="confirmation">Confirmer le mot de passe</label>
             <input id="confirmation" name="confirmation" type="password" [(ngModel)]="confirmation"
                    autocomplete="new-password" minlength="12" maxlength="72" required>
           }
 
-          <button class="submit" type="submit" [disabled]="authForm.invalid || busy()">
+@if (registering()) {
+            @if (accountType === 'DOCTOR') {
+              <label for="firstName">Prénom</label>
+              <input id="firstName" name="firstName" type="text" [(ngModel)]="firstName"
+                     maxlength="80" required placeholder="Ex. Jean">
+
+              <label for="lastName">Nom</label>
+              <input id="lastName" name="lastName" type="text" [(ngModel)]="lastName"
+                     maxlength="80" required placeholder="Ex. Dupont">
+
+              <label for="specialty">Spécialité médicale</label>
+              <input id="specialty" name="specialty" type="text" [(ngModel)]="specialty"
+                     maxlength="120" required placeholder="Ex. Médecine générale">
+
+              <label for="professionalNumber">Numéro d'ordre</label>
+              <input id="professionalNumber" name="professionalNumber" type="text" [(ngModel)]="professionalNumber"
+                     maxlength="40" required placeholder="Numéro d'ordre unique">
+
+              <label for="officeAddress">Adresse du cabinet</label>
+              <input id="officeAddress" name="officeAddress" type="text" [(ngModel)]="officeAddress"
+                     maxlength="500" placeholder="Adresse postale">
+
+              <label for="officeCity">Ville</label>
+              <input id="officeCity" name="officeCity" type="text" [(ngModel)]="officeCity"
+                     maxlength="120" placeholder="Ville du cabinet">
+
+              <label for="professionalPhone">Téléphone professionnel</label>
+              <input id="professionalPhone" name="professionalPhone" type="tel" [(ngModel)]="professionalPhone"
+                     maxlength="40" placeholder="Optionnel">
+
+              <label for="documentUrl">Lien vers justificatif (optionnel)</label>
+              <input id="documentUrl" name="documentUrl" type="url" [(ngModel)]="documentUrl"
+                     maxlength="2048" placeholder="https://...">
+
+              <label for="bio">Présentation professionnelle</label>
+              <textarea id="bio" name="bio" [(ngModel)]="bio" maxlength="4000"
+                         placeholder="Présentez brièvement votre expérience et votre pratique"></textarea>
+              <p class="privacy">Votre demande sera vérifiée par l'administration. Vous pourrez vous connecter à l'espace médecin après son approbation.</p>
+            } @else {
+              <p class="privacy">Votre inscription crée un compte patient et vous donne accès à votre espace personnel.</p>
+            }
+          }
+
+          <button class="submit" type="submit"
+                  [disabled]="authForm.invalid || busy() || (!registering() && (!captchaId() || captchaLoading()))">
             @if (busy()) { <span class="spinner" aria-hidden="true"></span> }
             {{ busy() ? 'Veuillez patienter…' : (registering() ? 'Créer mon compte' : 'Me connecter') }}
           </button>
@@ -106,6 +158,13 @@ import { AuthService } from '../../core/auth.service';
     .password-wrap { position: relative; }
     .password-wrap input { padding-right: 50px; }
     .password-wrap button { position: absolute; top: 4px; right: 4px; width: 40px; height: 40px; border: 0; border-radius: 9px; background: transparent; color: #718287; cursor: pointer; }
+    .captcha-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .captcha-row img,.captcha-placeholder { width:200px; height:70px; border:1px solid #dfe8e7; border-radius:10px; background:#fff; object-fit:contain; }
+    .captcha-placeholder { display:grid; place-items:center; color:#718287; font-size:12px; }
+    .captcha-refresh { display:flex; align-items:center; gap:6px; min-height:40px; border:1px solid #dfe8e7; border-radius:10px; padding:0 12px; background:#f7fbfa; color:#087e75; font:inherit; font-size:12px; font-weight:700; cursor:pointer; }
+    .captcha-refresh span:first-child { font-size:20px; }
+    .captcha-refresh:disabled { opacity:.55; cursor:wait; }
+    .captcha-help { margin:-5px 0 0; color:#75868a; font-size:11px; line-height:1.5; }
     .material-icons { font-size: 19px; }
     .privacy { margin: 2px 0 9px; color: #829197; font-size: 12px; line-height: 1.6; }
     .submit { display: flex; align-items: center; justify-content: center; gap: 10px; height: 50px; margin-top: 10px; border: 0; border-radius: 12px; background: #087e75; color: white; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 18px #087e752d; transition: transform .18s, background .18s; }
@@ -131,12 +190,23 @@ export class AuthComponent implements OnInit {
   readonly error = signal('');
   readonly success = signal('');
   readonly showPassword = signal(false);
+  readonly captchaId = signal('');
+  readonly captchaImage = signal('');
+  readonly captchaLoading = signal(false);
   email = '';
   password = '';
   confirmation = '';
+  captchaText = '';
   accountType: 'PATIENT' | 'DOCTOR' = 'PATIENT';
   specialty = '';
   bio = '';
+  firstName = '';
+  lastName = '';
+  officeAddress = '';
+  officeCity = '';
+  professionalNumber = '';
+  professionalPhone = '';
+  documentUrl = '';
 
   constructor(
     private readonly auth: AuthService,
@@ -146,6 +216,25 @@ export class AuthComponent implements OnInit {
 
   ngOnInit(): void {
     this.registering.set(this.route.snapshot.data['mode'] === 'register');
+    if (!this.registering()) this.refreshCaptcha();
+  }
+
+  refreshCaptcha(): void {
+    this.captchaLoading.set(true);
+    this.captchaId.set('');
+    this.captchaImage.set('');
+    this.captchaText = '';
+    this.auth.captcha().subscribe({
+      next: challenge => {
+        this.captchaId.set(challenge.captcha_id);
+        this.captchaImage.set(challenge.image);
+        this.captchaLoading.set(false);
+      },
+      error: () => {
+        this.captchaLoading.set(false);
+        this.error.set('Impossible de charger le CAPTCHA. Utilisez « Actualiser » pour réessayer.');
+      }
+    });
   }
 
   submit(): void {
@@ -155,9 +244,26 @@ export class AuthComponent implements OnInit {
       this.error.set('Les mots de passe ne correspondent pas.');
       return;
     }
+    if (!this.registering() && !this.captchaId()) {
+      this.error.set('Chargez un nouveau CAPTCHA avant de vous connecter.');
+      this.refreshCaptcha();
+      return;
+    }
     this.busy.set(true);
     if (this.registering() && this.accountType === 'DOCTOR') {
-      this.auth.registerDoctor(this.email.trim(), this.password, this.specialty.trim(), this.bio.trim()).subscribe({
+      this.auth.registerDoctor({
+        email: this.email.trim(),
+        password: this.password,
+        specialty: this.specialty.trim(),
+        bio: this.bio.trim() || null,
+        firstName: this.firstName.trim() || null,
+        lastName: this.lastName.trim() || null,
+        officeAddress: this.officeAddress.trim() || null,
+        officeCity: this.officeCity.trim() || null,
+        professionalNumber: this.professionalNumber.trim() || null,
+        professionalPhone: this.professionalPhone.trim() || null,
+        documentUrl: this.documentUrl.trim() || null
+      }).subscribe({
         next: () => {
           this.busy.set(false);
           this.password = '';
@@ -173,7 +279,11 @@ export class AuthComponent implements OnInit {
     }
     const request = this.registering()
       ? this.auth.registerPatient(this.email.trim(), this.password)
-      : this.auth.login(this.email.trim(), this.password);
+      : this.auth.login(
+          this.email.trim(),
+          this.password,
+          this.captchaId(),
+          this.captchaText);
     request.subscribe({
       next: () => {
         this.busy.set(false);
@@ -195,21 +305,23 @@ export class AuthComponent implements OnInit {
       error: error => {
         this.busy.set(false);
         this.setRequestError(error);
+        if (!this.registering()) this.refreshCaptcha();
       }
     });
   }
 
-  private setRequestError(error: { status: number }): void {
+  private setRequestError(error: { status: number; error?: { message?: string } }): void {
+    const backendMessage = typeof error.error?.message === 'string' ? error.error.message : '';
     if (error.status === 409) {
       this.error.set('Un compte ou une demande existe déjà pour cette adresse e-mail.');
     } else if (error.status === 401) {
-      this.error.set('Adresse e-mail ou mot de passe incorrect.');
+      this.error.set(backendMessage || 'Adresse e-mail, mot de passe incorrect ou compte non activé.');
     } else if (error.status === 429) {
       this.error.set('Trop de tentatives. Réessayez dans une minute.');
     } else {
       this.error.set(error.status === 0
         ? 'Le service est momentanément inaccessible.'
-        : 'Impossible de traiter la demande. Vérifiez les informations saisies.');
+        : backendMessage || 'Impossible de traiter la demande. Vérifiez les informations saisies.');
     }
   }
 }

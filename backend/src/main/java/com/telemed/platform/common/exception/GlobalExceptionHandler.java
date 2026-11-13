@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 import com.telemed.platform.common.api.ApiError;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -19,9 +20,14 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.telemed.platform.prescription.service.ExternalLlmUnavailableException;
+import com.telemed.platform.teleconsultation.service.TeleconsultationAccessDeniedException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception) {
@@ -45,6 +51,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     ResponseEntity<ApiError> handleAuthentication(AuthenticationException exception) {
         return errorResponse(HttpStatus.UNAUTHORIZED, "Authentification invalide.", Map.of());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException exception) {
+        return errorResponse(HttpStatus.FORBIDDEN, "Vous n’êtes pas autorisé à accéder à cette ressource.", Map.of());
+    }
+
+    @ExceptionHandler(TeleconsultationAccessDeniedException.class)
+    ResponseEntity<ApiError> handleTeleconsultationAccessDenied(TeleconsultationAccessDeniedException exception) {
+        return errorResponse(HttpStatus.FORBIDDEN, exception.getMessage(), Map.of());
     }
 
     @ExceptionHandler(NotFoundException.class)
@@ -84,6 +100,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiError> handleUnexpected(Exception exception) {
+        LOGGER.error("Unhandled API exception (type={}).", exception.getClass().getName());
         return errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Une erreur interne est survenue.", Map.of());
     }
 

@@ -14,6 +14,9 @@ import org.springframework.data.repository.query.Param;
 
 public interface DoctorRepository extends JpaRepository<Doctor, UUID> {
 
+    @Query("select d from Doctor d join fetch d.user where d.id = :id")
+    Optional<Doctor> findByIdWithUser(@Param("id") UUID id);
+
     Optional<Doctor> findByUserEmail(String email);
 
     Optional<Doctor> findByIdAndUserEnabledTrueAndVerificationStatus(UUID id, DoctorVerificationStatus status);

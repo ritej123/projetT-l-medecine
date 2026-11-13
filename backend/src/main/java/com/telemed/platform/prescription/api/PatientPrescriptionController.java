@@ -32,7 +32,7 @@ public class PatientPrescriptionController {
     }
 
     @GetMapping
-    public List<PrescriptionResponse> findMine(@AuthenticationPrincipal Jwt jwt) {
+    public List<PatientPrescriptionResponse> findMine(@AuthenticationPrincipal Jwt jwt) {
         return prescriptionService.findPatientPrescriptions(jwt.getClaimAsString("email"));
     }
 
@@ -40,7 +40,7 @@ public class PatientPrescriptionController {
     public ResponseEntity<byte[]> exportPdf(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID prescriptionId) {
-        byte[] pdf = pdfService.createSignedPdf(
+        byte[] pdf = pdfService.createPdf(
                 prescriptionService.findFinalForPatient(jwt.getClaimAsString("email"), prescriptionId));
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)

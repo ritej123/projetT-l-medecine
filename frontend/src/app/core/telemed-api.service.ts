@@ -10,6 +10,11 @@ export interface AuthTokens {
   expiresIn: number;
 }
 
+export interface CaptchaChallenge {
+  captcha_id: string;
+  image: string;
+}
+
 export interface UserClaims {
   sub: string;
   email: string;
@@ -23,12 +28,37 @@ export interface Appointment {
   scheduledAt: string;
   durationMinutes: number;
   status: 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'DONE';
+  consultationReason?: string | null;
 }
 
 export interface DoctorProfile {
   id: string;
+  firstName: string | null;
+  lastName: string | null;
+  specialty: string;
+  officeAddress: string | null;
+  officeCity: string | null;
+  professionalNumber: string | null;
+  profilePhotoUrl?: string | null;
+}
+
+export interface PatientDoctorDetail extends DoctorProfile {
+  bio: string | null;
+  availabilities: DoctorAvailability[];
+}
+
+export interface DoctorRegistrationRequest {
+  email: string;
+  password: string;
   specialty: string;
   bio: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  officeAddress: string | null;
+  officeCity: string | null;
+  professionalNumber: string | null;
+  professionalPhone: string | null;
+  documentUrl: string | null;
 }
 
 export type DayOfWeek =
@@ -56,6 +86,7 @@ export interface DoctorDashboardAppointment {
   scheduledAt: string;
   durationMinutes: number;
   status: Appointment['status'];
+  consultationReason?: string | null;
 }
 
 export interface DoctorDashboardStats {
@@ -161,6 +192,17 @@ export interface Prescription {
   date: string | null;
 }
 
+export interface PatientPrescription {
+  id: string;
+  appointmentId: string;
+  doctorId: string;
+  doctorName: string;
+  doctorSpecialty: string;
+  content: string;
+  date: string | null;
+  consultationAt: string;
+}
+
 export interface PrescriptionRevision {
   id: string;
   revisionNumber: number;
@@ -180,6 +222,18 @@ export interface AdminDoctor {
   createdAt: string;
 }
 
+
+export interface AdminDoctorDetail extends AdminDoctor {
+  firstName: string | null;
+  lastName: string | null;
+  professionalPhone: string | null;
+  officeAddress: string | null;
+  officeCity: string | null;
+  professionalNumber: string | null;
+  professionalNumberVerified: boolean;
+  documentUrl: string | null;
+  documentUploadedAt: string | null;
+}
 export interface AdminPatient {
   id: string;
   email: string;
@@ -238,27 +292,33 @@ export interface PageResponse<T> {
 
 @Injectable({ providedIn: 'root' })
 export class TelemedApiService {
+  private readonly apiRoot: string;
   private readonly baseUrl: string;
 
   constructor(private readonly http: HttpClient, @Inject(API_BASE_URL) baseUrl: string) {
-    this.baseUrl = `${baseUrl.replace(/\/$/, '')}/api/v1`;
+    this.apiRoot = baseUrl.replace(/\/$/, '');
+    this.baseUrl = `${this.apiRoot}/api/v1`;
   }
 
-  login(email: string, password: string): Observable<AuthTokens> {
-    return this.http.post<AuthTokens>(`${this.baseUrl}/auth/login`, { email, password });
+  captcha(): Observable<CaptchaChallenge> {
+    return this.http.get<CaptchaChallenge>(`${this.apiRoot}/api/captcha`);
+  }
+
+  login(email: string, password: string, captchaId: string, captchaText: string): Observable<AuthTokens> {
+    return this.http.post<AuthTokens>(`${this.baseUrl}/auth/login`, {
+      email,
+      password,
+      captcha_id: captchaId,
+      captcha_text: captchaText
+    });
   }
 
   registerPatient(email: string, password: string): Observable<AuthTokens> {
     return this.http.post<AuthTokens>(`${this.baseUrl}/auth/register`, { email, password });
   }
 
-  registerDoctor(email: string, password: string, specialty: string, bio: string): Observable<void> {
-    return this.http.post<void>(`${this.baseUrl}/auth/register/doctor`, {
-      email,
-      password,
-      specialty,
-      bio: bio || null
-    });
+  registerDoctor(request: DoctorRegistrationRequest): Observable<void> {
+    return this.http.post<void>(`${this.baseUrl}/auth/register/doctor`, request);
   }
 
   refresh(refreshToken: string): Observable<AuthTokens> {
@@ -281,6 +341,10 @@ export class TelemedApiService {
     return this.http.get<DoctorDashboardStats>(`${this.baseUrl}/doctor/dashboard/stats`);
   }
 
+  checkTeleconsultationAccess(appointmentId: string): Observable<void> {
+    return this.http.get<void>(`${this.baseUrl}/teleconsultations/${appointmentId}/access`);
+  }
+
   doctorPatients(search = '', page = 0, size = 20): Observable<PageResponse<DoctorPatient>> {
     const params = new HttpParams().set('search', search).set('page', page).set('size', size);
     return this.http.get<PageResponse<DoctorPatient>>(`${this.baseUrl}/doctor/patients`, { params });
@@ -290,8 +354,8 @@ export class TelemedApiService {
     return this.http.get<DoctorPatientDetail>(`${this.baseUrl}/doctor/patients/${patientId}`);
   }
 
-  doctorConsultation(appointmentId: string): Observable<DoctorConsultation> {
-    return this.http.get<DoctorConsultation>(
+  doctorConsultation(appointmentId: string): Observable<DoctorConsultation | null> {
+    return this.http.get<DoctorConsultation | null>(
       `${this.baseUrl}/doctor/appointments/${appointmentId}/consultation`
     );
   }
@@ -313,8 +377,8 @@ export class TelemedApiService {
     );
   }
 
-  doctorPrescription(appointmentId: string): Observable<Prescription> {
-    return this.http.get<Prescription>(
+  doctorPrescription(appointmentId: string): Observable<Prescription | null> {
+    return this.http.get<Prescription | null>(
       `${this.baseUrl}/doctor/appointments/${appointmentId}/prescription`
     );
   }
@@ -409,8 +473,12 @@ export class TelemedApiService {
     return this.http.get<DoctorProfile[]>(`${this.baseUrl}/patient/doctors`);
   }
 
-  patientPrescriptions(): Observable<Prescription[]> {
-    return this.http.get<Prescription[]>(`${this.baseUrl}/patient/prescriptions`);
+  patientDoctor(doctorId: string): Observable<PatientDoctorDetail> {
+    return this.http.get<PatientDoctorDetail>(`${this.baseUrl}/patient/doctors/${doctorId}`);
+  }
+
+  patientPrescriptions(): Observable<PatientPrescription[]> {
+    return this.http.get<PatientPrescription[]>(`${this.baseUrl}/patient/prescriptions`);
   }
 
   availableSlots(doctorId: string, from: string, to: string): Observable<AppointmentSlot[]> {
@@ -421,8 +489,15 @@ export class TelemedApiService {
     );
   }
 
-  bookAppointment(doctorId: string, scheduledAt: string): Observable<Appointment> {
-    return this.http.post<Appointment>(`${this.baseUrl}/patient/appointments`, { doctorId, scheduledAt });
+  bookAppointment(
+    doctorId: string,
+    scheduledAt: string,
+    consultationReason: string | null = null
+  ): Observable<Appointment> {
+    return this.http.post<Appointment>(
+      `${this.baseUrl}/patient/appointments`,
+      { doctorId, scheduledAt, consultationReason }
+    );
   }
 
   updateAppointmentStatus(appointmentId: string, status: Appointment['status']): Observable<Appointment> {
@@ -474,12 +549,16 @@ export class TelemedApiService {
     return this.http.patch<AdminDoctor>(`${this.baseUrl}/admin/doctors/${id}/verify`, {});
   }
 
-  rejectAdminDoctor(id: string): Observable<AdminDoctor> {
-    return this.http.patch<AdminDoctor>(`${this.baseUrl}/admin/doctors/${id}/reject`, {});
+  rejectAdminDoctor(id: string, reason?: string): Observable<AdminDoctor> {
+    return this.http.patch<AdminDoctor>(`${this.baseUrl}/admin/doctors/${id}/reject`, { reason: reason ?? '' });
   }
 
   setAdminDoctorEnabled(id: string, enabled: boolean): Observable<AdminDoctor> {
     return this.http.patch<AdminDoctor>(`${this.baseUrl}/admin/doctors/${id}/status`, { enabled });
+  }
+
+  adminDoctorDetail(id: string): Observable<AdminDoctorDetail> {
+    return this.http.get<AdminDoctorDetail>(`${this.baseUrl}/admin/doctors/${id}`);
   }
 
   adminPatients(filters: {

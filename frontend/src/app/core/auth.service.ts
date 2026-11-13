@@ -1,7 +1,13 @@
 import { Injectable, signal } from '@angular/core';
 import { Observable, tap } from 'rxjs';
 import { AccessTokenStore } from './access-token.store';
-import { AuthTokens, TelemedApiService, UserClaims } from './telemed-api.service';
+import {
+  AuthTokens,
+  CaptchaChallenge,
+  DoctorRegistrationRequest,
+  TelemedApiService,
+  UserClaims
+} from './telemed-api.service';
 
 const REFRESH_TOKEN_KEY = 'telemed.refreshToken';
 
@@ -18,16 +24,25 @@ export class AuthService {
     return this.claims() !== null;
   }
 
-  login(email: string, password: string): Observable<AuthTokens> {
-    return this.api.login(email, password).pipe(tap(tokens => this.store(tokens)));
+  login(
+    email: string,
+    password: string,
+    captchaId: string,
+    captchaText: string
+  ): Observable<AuthTokens> {
+    return this.api.login(email, password, captchaId, captchaText).pipe(tap(tokens => this.store(tokens)));
+  }
+
+  captcha(): Observable<CaptchaChallenge> {
+    return this.api.captcha();
   }
 
   registerPatient(email: string, password: string): Observable<AuthTokens> {
     return this.api.registerPatient(email, password).pipe(tap(tokens => this.store(tokens)));
   }
 
-  registerDoctor(email: string, password: string, specialty: string, bio: string): Observable<void> {
-    return this.api.registerDoctor(email, password, specialty, bio);
+  registerDoctor(request: DoctorRegistrationRequest): Observable<void> {
+    return this.api.registerDoctor(request);
   }
 
   logout(): void {

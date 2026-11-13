@@ -1,4 +1,5 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, computed } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppointmentSlot, DoctorProfile, TelemedApiService } from '../../core/telemed-api.service';
@@ -12,7 +13,7 @@ interface CalendarDay {
 @Component({
   selector: 'app-booking',
   standalone: true,
-  imports: [DatePipe, RouterLink],
+  imports: [FormsModule, DatePipe, RouterLink],
   template: `
     <div class="booking-page">
       <header class="header">
@@ -24,17 +25,35 @@ interface CalendarDay {
         @if (error()) { <div class="notice" role="alert">{{ error() }}</div> }
         @if (success()) { <div class="success" role="status">{{ success() }} <a routerLink="/patient">Voir mes rendez-vous</a></div> }
         <div class="booking-grid">
-          <section class="calendar-card">
-            <div class="step-heading"><span class="step">1</span><div><h2>Choisir un médecin</h2><p>Les disponibilités à venir s’afficheront sur le calendrier.</p></div></div>
-            @if (doctors().length === 0) {
-              <div class="doctor-empty">Aucun médecin n’est disponible dans l’annuaire pour le moment.</div>
+<section class="calendar-card">
+            <div class="step-heading"><span class="step">1</span><div><h2>Choisir un médecin</h2><p>Les disponibilités à venir s'afficheront sur le calendrier.</p></div></div>
+
+            <div class="filters">
+              <input aria-label="Recherche" placeholder="Rechercher par nom ou spécialité" [(ngModel)]="search" type="text">
+              <select aria-label="Filtrer par spécialité" [(ngModel)]="specialtyFilter">
+                <option value="">Toutes les spécialités</option>
+                @for (specialty of availableSpecialties(); track specialty) {
+                  <option [value]="specialty">{{ specialty }}</option>
+                }
+              </select>
+              <input aria-label="Filtrer par ville" placeholder="Filtrer par ville" [(ngModel)]="cityFilter" type="text">
+            </div>
+
+            @if (loadingDoctors()) {
+              <div class="loading"><span class="loader"></span>Chargement des médecins…</div>
+            } @else if (filteredDoctors().length === 0) {
+              <div class="doctor-empty">Aucun médecin ne correspond à ces critères.</div>
             } @else {
               <div class="doctor-list" role="list" aria-label="Médecins disponibles">
-                @for (doctor of doctors(); track doctor.id) {
+                @for (doctor of filteredDoctors(); track doctor.id) {
                   <button type="button" class="doctor-choice" [class.selected]="selectedDoctor()?.id === doctor.id"
                           (click)="selectDoctor(doctor)">
                     <span class="doctor-avatar material-icons">medical_services</span>
-                    <span class="doctor-copy"><strong>Médecin</strong><small>{{ doctor.specialty }}</small></span>
+                    <span class="doctor-copy">
+                      <strong>{{ doctor.firstName }} {{ doctor.lastName }}</strong>
+                      <small>{{ doctor.specialty }}</small>
+                      @if (doctor.officeCity) { <small class="location"><span class="material-icons">location_on</span>{{ doctor.officeCity }}</small> }
+                    </span>
                     <span class="check material-icons">{{ selectedDoctor()?.id === doctor.id ? 'check_circle' : 'radio_button_unchecked' }}</span>
                   </button>
                 }
@@ -103,6 +122,11 @@ interface CalendarDay {
     .booking-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(310px,.75fr); align-items:start; gap:17px; }.calendar-card,.slots-card { border:1px solid #e6edeb; border-radius:19px; padding:22px; background:#fff; box-shadow:0 8px 28px #234b4008; }
     .step-heading { display:flex; align-items:flex-start; gap:11px; }.step { display:grid; width:26px; height:26px; flex:0 0 auto; place-items:center; border-radius:50%; background:#e5f4ee; color:#138173; font-size:11px; font-weight:800; }.step-heading h2 { margin:2px 0 5px; color:#2c4c54; font-size:14px; }.step-heading p { margin:0; color:#89979a; font-size:10px; line-height:1.5; }
     .doctor-list { display:grid; gap:7px; margin:15px 0 23px; }.doctor-choice { display:flex; align-items:center; gap:10px; width:100%; border:1px solid #e7edeb; border-radius:12px; padding:10px; background:white; text-align:left; cursor:pointer; transition:border .16s,background .16s; }.doctor-choice:hover,.doctor-choice.selected { border-color:#a9d9cb; background:#f5fbf8; }.doctor-avatar { display:grid; width:36px; height:36px; place-items:center; border-radius:11px; background:#eaf3f0; color:#2b8a7d; font-size:18px; }.doctor-copy { display:grid; flex:1; gap:4px; }.doctor-copy strong { color:#38555d; font-size:11px; }.doctor-copy small { color:#819093; font-size:10px; }.check { color:#168477; font-size:18px; }.doctor-empty { margin:15px 0 22px; border-radius:10px; padding:13px; background:#f7faf9; color:#7d8d90; font-size:11px; }
+.filters { display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px; margin:15px 0 10px; }
+.filters input,.filters select { border:1px solid #e5ece9; border-radius:10px; padding:9px 11px; font:inherit; font-size:11px; }
+.doctor-copy .location { display:flex; align-items:center; gap:3px; color:#7f9093; font-size:9px; }
+.doctor-copy .location .material-icons { font-size:12px; }
+.loading { display:flex; align-items:center; gap:8px; margin:15px 0 22px; color:#879598; font-size:11px; }
     .calendar-title { margin-bottom:18px; }.month-bar { display:flex; align-items:center; justify-content:space-between; margin:8px 0 14px; }.month-bar strong { color:#38565d; font-size:13px; text-transform:capitalize; }.month-bar button { width:29px; height:29px; border:1px solid #e5ece9; border-radius:9px; background:#fff; color:#59746e; font-size:20px; cursor:pointer; }
     .calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); justify-items:center; gap:6px 4px; }.weekday { padding:5px 0; color:#9aa6a6; font-size:9px; text-transform:capitalize; }.calendar-day,.calendar-spacer { display:grid; width:37px; height:37px; place-items:center; }.calendar-day { border:1px solid transparent; border-radius:50%; background:transparent; color:#aab4b4; font:inherit; font-size:11px; }.calendar-day.available { color:#2b6f61; cursor:pointer; }.calendar-day.available:not(.selected) { background:#f0f8f4; }.calendar-day.selected { border-color:#087e75; background:#087e75; color:white; font-weight:750; }.calendar-day:disabled { cursor:default; opacity:.45; }
     .loading-note { display:flex; align-items:center; gap:8px; margin:16px 0 0; color:#879598; font-size:10px; }.loader { width:13px; height:13px; border:2px solid #d8eae4; border-top-color:#087e75; border-radius:50%; animation:spin .7s linear infinite; }
@@ -125,23 +149,72 @@ export class BookingComponent implements OnInit {
   readonly selectedDateKey = signal('');
   readonly selectedSlot = signal<AppointmentSlot | null>(null);
   readonly loadingSlots = signal(false);
+  readonly loadingDoctors = signal(false);
   readonly booking = signal(false);
   readonly error = signal('');
   readonly success = signal('');
+  readonly search = signal('');
+  readonly specialtyFilter = signal('');
+  readonly cityFilter = signal('');
   readonly weekdays = ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'];
   monthDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+  readonly filteredDoctors = computed(() => {
+    const list = this.doctors();
+    const term = this.search().trim().toLowerCase();
+    const specialty = this.specialtyFilter().trim();
+    const city = this.cityFilter().trim().toLowerCase();
+    if (!term && !specialty && !city) {
+      return list;
+    }
+    return list.filter(doctor => {
+      if (term) {
+        const fullName = `${doctor.firstName || ''} ${doctor.lastName || ''}`.toLowerCase();
+        if (!fullName.includes(term) && !(doctor.specialty || '').toLowerCase().includes(term)) {
+          return false;
+        }
+      }
+      if (specialty && (doctor.specialty || '').toLowerCase() !== specialty.toLowerCase()) {
+        return false;
+      }
+      if (city && !(doctor.officeCity || '').toLowerCase().includes(city)) {
+        return false;
+      }
+      return true;
+    });
+  });
+
+  readonly availableSpecialties = computed(() => {
+    const set = new Set<string>();
+    for (const doctor of this.doctors()) {
+      if (doctor.specialty) {
+        set.add(doctor.specialty);
+      }
+    }
+    return Array.from(set).sort();
+  });
 
   constructor(private readonly api: TelemedApiService) {}
 
   ngOnInit(): void {
+    this.loadDoctors();
+  }
+
+  loadDoctors(): void {
+    this.loadingDoctors.set(true);
+    this.error.set('');
     this.api.patientDoctors().subscribe({
       next: doctors => {
         this.doctors.set(doctors);
+        this.loadingDoctors.set(false);
         if (doctors.length > 0) {
           this.selectDoctor(doctors[0]);
         }
       },
-      error: () => this.error.set('L’annuaire des médecins est indisponible.')
+      error: () => {
+        this.loadingDoctors.set(false);
+        this.error.set("L'annuaire des médecins est indisponible.");
+      }
     });
   }
 

@@ -22,7 +22,7 @@ public class AppointmentEmailNotification {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "appointment_id", nullable = false)
+    @Column(name = "appointment_id")
     private UUID appointmentId;
 
     @Column(nullable = false, length = 254)
@@ -35,7 +35,7 @@ public class AppointmentEmailNotification {
     @Column(name = "scheduled_at", nullable = false)
     private Instant scheduledAt;
 
-    @Column(name = "appointment_at", nullable = false)
+    @Column(name = "appointment_at")
     private LocalDateTime appointmentAt;
 
     @Column(name = "next_attempt_at", nullable = false)
@@ -51,6 +51,9 @@ public class AppointmentEmailNotification {
     @Column(name = "event_sequence", nullable = false)
     private int eventSequence;
 
+    @Column(name = "message_body", length = 4000)
+    private String messageBody;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -64,7 +67,7 @@ public class AppointmentEmailNotification {
             NotificationType type,
             Instant scheduledAt,
             LocalDateTime appointmentAt) {
-        this(appointmentId, recipient, type, scheduledAt, appointmentAt, 0);
+        this(appointmentId, recipient, type, scheduledAt, appointmentAt, 0, null);
     }
 
     public AppointmentEmailNotification(
@@ -74,6 +77,17 @@ public class AppointmentEmailNotification {
             Instant scheduledAt,
             LocalDateTime appointmentAt,
             int eventSequence) {
+        this(appointmentId, recipient, type, scheduledAt, appointmentAt, eventSequence, null);
+    }
+
+    public AppointmentEmailNotification(
+            UUID appointmentId,
+            String recipient,
+            NotificationType type,
+            Instant scheduledAt,
+            LocalDateTime appointmentAt,
+            int eventSequence,
+            String messageBody) {
         this.appointmentId = appointmentId;
         this.recipient = recipient;
         this.type = type;
@@ -81,6 +95,17 @@ public class AppointmentEmailNotification {
         this.nextAttemptAt = scheduledAt;
         this.appointmentAt = appointmentAt;
         this.eventSequence = eventSequence;
+        this.messageBody = messageBody;
+    }
+
+    public AppointmentEmailNotification(
+            String recipient,
+            NotificationType type,
+            Instant scheduledAt,
+            LocalDateTime appointmentAt,
+            int eventSequence,
+            String messageBody) {
+        this(null, recipient, type, scheduledAt, appointmentAt, eventSequence, messageBody);
     }
 
     public UUID getId() {
@@ -99,12 +124,8 @@ public class AppointmentEmailNotification {
         return type;
     }
 
-    public int getAttempts() {
-        return attempts;
-    }
-
-    public NotificationStatus getStatus() {
-        return status;
+    public Instant getScheduledAt() {
+        return scheduledAt;
     }
 
     public Instant getNextAttemptAt() {
@@ -113,6 +134,18 @@ public class AppointmentEmailNotification {
 
     public LocalDateTime getAppointmentAt() {
         return appointmentAt;
+    }
+
+    public String getMessageBody() {
+        return messageBody;
+    }
+
+    public int getAttempts() {
+        return attempts;
+    }
+
+    public NotificationStatus getStatus() {
+        return status;
     }
 
     public void markSent() {

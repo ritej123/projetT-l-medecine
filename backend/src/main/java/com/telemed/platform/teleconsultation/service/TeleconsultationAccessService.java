@@ -9,7 +9,6 @@ import com.telemed.platform.appointment.domain.Appointment;
 import com.telemed.platform.appointment.domain.AppointmentStatus;
 import com.telemed.platform.appointment.repository.AppointmentRepository;
 import com.telemed.platform.common.exception.NotFoundException;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,17 +35,20 @@ public class TeleconsultationAccessService {
         boolean isPatient = appointment.getPatient().getUser().getEmail().equalsIgnoreCase(email);
         boolean isDoctor = appointment.getDoctor().getUser().getEmail().equalsIgnoreCase(email);
         if (!isPatient && !isDoctor) {
-            throw new AccessDeniedException("Seuls les participants au rendez-vous peuvent rejoindre la salle.");
+            throw new TeleconsultationAccessDeniedException(
+                    "Ce compte n’est pas associé à ce rendez-vous.");
         }
         if (appointment.getStatus() != AppointmentStatus.PENDING
                 && appointment.getStatus() != AppointmentStatus.CONFIRMED) {
-            throw new AccessDeniedException("Ce rendez-vous ne permet pas de rejoindre la salle.");
+            throw new TeleconsultationAccessDeniedException(
+                    "Le rendez-vous n’est ni en attente ni confirmé. Il doit être planifié avant de rejoindre la salle.");
         }
         LocalDateTime now = LocalDateTime.now(clock.withZone(appointmentZone));
         LocalDateTime startsAt = appointment.getScheduledAt();
         LocalDateTime endsAt = startsAt.plusMinutes(appointment.getDurationMinutes());
         if (now.isBefore(startsAt) || !now.isBefore(endsAt)) {
-            throw new AccessDeniedException("La salle est accessible uniquement pendant le rendez-vous.");
+            throw new TeleconsultationAccessDeniedException(
+                    "La salle est accessible uniquement pendant l’horaire confirmé du rendez-vous.");
         }
     }
 }

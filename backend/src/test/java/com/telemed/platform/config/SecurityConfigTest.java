@@ -21,6 +21,7 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.core.Authentication;
+import org.springframework.mock.env.MockEnvironment;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -30,7 +31,7 @@ class SecurityConfigTest {
 
     @Test
     void decoderRejectsRefreshTokensAsApiCredentials() {
-        var key = securityConfig.jwtSecretKey("a-long-test-secret-that-is-at-least-32-bytes");
+        var key = securityConfig.jwtSecretKey("l9ug8gIouYc5CCXM2XAG+yf6e75VnNytua7gA8Htg0o=");
         JwtEncoder encoder = securityConfig.jwtEncoder(key);
         UserRepository userRepository = mock(UserRepository.class);
         UUID accountId = UUID.randomUUID();
@@ -55,6 +56,18 @@ class SecurityConfigTest {
         assertThat(cors.getAllowCredentials()).isFalse();
         assertThatThrownBy(() -> securityConfig.corsConfigurationSource("*"))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void jwtSecretIsGeneratedOnlyForExplicitDevelopmentProfile() {
+        MockEnvironment developmentEnvironment = new MockEnvironment();
+        developmentEnvironment.setActiveProfiles("dev");
+        var developmentKey = securityConfig.jwtSecretKey("", developmentEnvironment);
+
+        assertThat(developmentKey.getEncoded()).hasSizeGreaterThanOrEqualTo(32);
+        assertThatThrownBy(() -> securityConfig.jwtSecretKey("", new MockEnvironment()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("JWT_SECRET");
     }
 
     @Test

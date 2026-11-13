@@ -5,9 +5,9 @@ spring:
   application:
     name: telemed-api
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5433/basetélé}
-    username: postgres
-    password: ritej
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/baset%C3%A9l%C3%A9}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
   jpa:
     open-in-view: false
     hibernate:
@@ -44,7 +44,7 @@ app:
     zone-id: ${APPOINTMENT_ZONE_ID:Europe/Paris}
   bootstrap:
     admin:
-      email: ${BOOTSTRAP_ADMIN_EMAIL:admin@gmail.com}
+      email: ${BOOTSTRAP_ADMIN_EMAIL:}
       password: ${BOOTSTRAP_ADMIN_PASSWORD:}
   email:
     from: ${MAIL_FROM:no-reply@example.test}
@@ -54,5 +54,3 @@ app:
       endpoint: ${LLM_PRESCRIPTION_ENDPOINT:}
       api-key: ${LLM_PRESCRIPTION_API_KEY:}
       model: ${LLM_PRESCRIPTION_MODEL:}
-  prescription:
-    signing-secret: ${PRESCRIPTION_SIGNING_SECRET:}

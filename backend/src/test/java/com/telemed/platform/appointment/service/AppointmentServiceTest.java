@@ -165,6 +165,37 @@ class AppointmentServiceTest {
     }
 
     @Test
+    void storesTheOptionalConsultationReasonForTheDoctor() {
+        UUID doctorId = UUID.randomUUID();
+        Doctor doctor = doctor("doctor@example.test", doctorId);
+        LocalDateTime scheduledAt = LocalDateTime.of(2026, 10, 13, 10, 0);
+        when(patientRepository.findByUserEmail("patient@example.test")).thenReturn(Optional.of(patient("patient@example.test")));
+        when(doctorRepository.findByIdAndUserEnabledTrueAndVerificationStatus(
+                        doctorId, com.telemed.platform.doctor.domain.DoctorVerificationStatus.VERIFIED))
+                .thenReturn(Optional.of(doctor));
+        when(availabilityRepository.findAllByDoctorIdAndDayOfWeekOrderByStartTimeAsc(doctorId, DayOfWeek.TUESDAY))
+                .thenReturn(List.of(new Availability(
+                        doctor, DayOfWeek.TUESDAY, LocalTime.of(9, 0), LocalTime.of(12, 0), 30)));
+        when(appointmentSlotRepository.findByDoctorIdAndScheduledAt(doctorId, scheduledAt))
+                .thenReturn(Optional.empty());
+        when(appointmentRepository.existsByDoctorIdAndScheduledAtAndStatusIn(any(), any(), any()))
+                .thenReturn(false);
+        when(appointmentRepository.saveAndFlush(any(Appointment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(appointmentMapper.toResponse(any(Appointment.class))).thenReturn(
+                new AppointmentResponse(UUID.randomUUID(), UUID.randomUUID(), doctorId, scheduledAt, 30,
+                        AppointmentStatus.PENDING, "Contrôle annuel"));
+
+        service.book("patient@example.test",
+                new CreateAppointmentRequest(doctorId, scheduledAt, "  Contrôle annuel  "));
+
+        org.mockito.ArgumentCaptor<Appointment> savedAppointment =
+                org.mockito.ArgumentCaptor.forClass(Appointment.class);
+        verify(appointmentRepository).saveAndFlush(savedAppointment.capture());
+        assertThat(savedAppointment.getValue().getConsultationReason()).isEqualTo("Contrôle annuel");
+    }
+
+    @Test
     void rejectsAConcurrentReservationOfAnAlreadyClaimedSlot() {
         UUID doctorId = UUID.randomUUID();
         Doctor doctor = doctor("doctor@example.test", doctorId);

@@ -82,6 +82,7 @@ public class DoctorDashboardService {
                 appointment.getPatient().getUser().getEmail(),
                 appointment.getScheduledAt(),
                 appointment.getDurationMinutes(),
-                appointment.getStatus());
+                appointment.getStatus(),
+                appointment.getConsultationReason());
     }
 }

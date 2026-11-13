@@ -7,6 +7,7 @@ import {
   AdminAuditLog,
   AdminDashboardStats,
   AdminDoctor,
+  AdminDoctorDetail,
   AdminPatient,
   PageResponse,
   TelemedApiService
@@ -129,12 +130,33 @@ type AdminSection = 'dashboard' | 'patients' | 'doctors' | 'pending' | 'appointm
             </div>
             @if (loadingList()) { <div class="loading"><span class="loader"></span>Chargement des médecins…</div> }
             @else if (doctors()?.content?.length) {
-              <div class="table-wrap"><table><thead><tr><th>Médecin</th><th>Spécialité</th><th>Vérification</th><th>Compte</th><th>Inscription</th><th>Actions</th></tr></thead><tbody>
+              <div class="table-wrap"><table><thead><tr><th>Médecin</th><th>Dossier</th><th>Spécialité</th><th>Vérification</th><th>Compte</th><th>Inscription</th><th>Actions</th></tr></thead><tbody>
                 @for (doctor of doctors()!.content; track doctor.id) {
-                  <tr><td><strong>{{ doctor.email }}</strong>@if (doctor.bio) { <small class="subtext">{{ doctor.bio }}</small> }</td><td>{{ doctor.specialty }}</td><td><span class="status" [class]="verificationClass(doctor.verificationStatus)">{{ verificationLabel(doctor.verificationStatus) }}</span></td><td>{{ doctor.enabled ? 'Actif' : 'Suspendu' }}</td><td>{{ doctor.createdAt | date:'d MMM y':'':'fr' }}</td><td class="actions">
-                    @if (doctor.verificationStatus === 'PENDING') { <button class="small-action" [disabled]="busyId() === doctor.id" (click)="verifyDoctor(doctor)">Valider</button><button class="small-action danger" [disabled]="busyId() === doctor.id" (click)="rejectDoctor(doctor)">Refuser</button> }
-                    @if (doctor.verificationStatus === 'VERIFIED') { <button class="small-action" [disabled]="busyId() === doctor.id" (click)="setDoctorEnabled(doctor)">{{ doctor.enabled ? 'Suspendre' : 'Réactiver' }}</button> }
-                  </td></tr>
+                  <tr>
+                    <td>
+                      <strong>{{ doctor.email }}</strong>
+                      @if (doctor.bio) { <small class="subtext">{{ doctor.bio }}</small> }
+                    </td>
+                    <td>
+                      <button type="button" class="view-doc-btn" (click)="openDoctorDetail(doctor)">
+                        <span class="material-icons">folder_shared</span> Voir dossier
+                      </button>
+                    </td>
+                    <td>{{ doctor.specialty }}</td>
+                    <td><span class="status" [class]="verificationClass(doctor.verificationStatus)">{{ verificationLabel(doctor.verificationStatus) }}</span></td>
+                    <td>{{ doctor.enabled ? 'Actif' : 'Suspendu' }}</td>
+                    <td>{{ doctor.createdAt | date:'d MMM y':'':'fr' }}</td>
+                    <td class="actions">
+                      
+                      @if (doctor.verificationStatus === 'PENDING') {
+                        <button class="small-action success-btn" [disabled]="busyId() === doctor.id" (click)="verifyDoctor(doctor)">Valider</button>
+                        <button class="small-action danger" [disabled]="busyId() === doctor.id" (click)="rejectDoctor(doctor)">Refuser</button>
+                      }
+                      @if (doctor.verificationStatus === 'VERIFIED') {
+                        <button class="small-action" [disabled]="busyId() === doctor.id" (click)="setDoctorEnabled(doctor)">{{ doctor.enabled ? 'Suspendre' : 'Réactiver' }}</button>
+                      }
+                    </td>
+                  </tr>
                 }
               </tbody></table></div>
               <div class="pagination"><span>{{ doctors()!.totalElements }} médecin(s) · page {{ doctors()!.number + 1 }} / {{ maxPage(doctors()!.totalPages) }}</span><button [disabled]="doctors()!.number === 0" (click)="loadDoctors(doctors()!.number - 1)">Précédent</button><button [disabled]="doctors()!.number + 1 >= doctors()!.totalPages" (click)="loadDoctors(doctors()!.number + 1)">Suivant</button></div>
@@ -204,6 +226,113 @@ type AdminSection = 'dashboard' | 'patients' | 'doctors' | 'pending' | 'appointm
         @if (section() === 'settings') {
           <section class="panel"><h2>Paramètres de la plateforme</h2><p class="empty">Aucun paramètre métier administrable n’est encore exposé par le backend. Les secrets et paramètres techniques restent configurés côté serveur.</p></section>
         }
+        
+        @if (selectedDoctor()) {
+          <div class="modal-backdrop" (click)="closeDetail()">
+            <div class="modal-card" (click)="$event.stopPropagation()">
+              <div class="modal-header">
+                <div>
+                  <span class="eyebrow">DOSSIER COMPLET DU MÉDECIN</span>
+                  <h2>{{ selectedDoctor()!.firstName || selectedDoctor()!.lastName ? ((selectedDoctor()!.firstName || '') + ' ' + (selectedDoctor()!.lastName || '')) : selectedDoctor()!.email }}</h2>
+                  <p class="modal-subtitle">Identifiant : {{ selectedDoctor()!.id }}</p>
+                </div>
+                <button type="button" class="close-btn" aria-label="Fermer" (click)="closeDetail()">✕</button>
+              </div>
+
+              <div class="modal-body">
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <label>Statut de vérification</label>
+                    <div><span class="status" [class]="verificationClass(selectedDoctor()!.verificationStatus)">{{ verificationLabel(selectedDoctor()!.verificationStatus) }}</span></div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Statut du compte</label>
+                    <div><strong>{{ selectedDoctor()!.enabled ? 'Actif' : 'Suspendu / En attente' }}</strong></div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Adresse e-mail</label>
+                    <div><strong>{{ selectedDoctor()!.email }}</strong></div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Spécialité</label>
+                    <div><strong>{{ selectedDoctor()!.specialty || 'Non renseignée' }}</strong></div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Prénom & Nom</label>
+                    <div>{{ (selectedDoctor()!.firstName || '') + ' ' + (selectedDoctor()!.lastName || '') || 'Non renseigné' }}</div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Téléphone professionnel</label>
+                    <div>{{ selectedDoctor()!.professionalPhone || 'Non renseigné' }}</div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Numéro professionnel (RPPS / Adeli)</label>
+                    <div>
+                      <strong>{{ selectedDoctor()!.professionalNumber || 'Non renseigné' }}</strong>
+                      @if (selectedDoctor()!.professionalNumberVerified) {
+                        <span class="status verified ml-1">Vérifié</span>
+                      }
+                    </div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Adresse du cabinet</label>
+                    <div>{{ selectedDoctor()!.officeAddress || 'Non renseignée' }}</div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Ville du cabinet</label>
+                    <div>{{ selectedDoctor()!.officeCity || 'Non renseignée' }}</div>
+                  </div>
+                  <div class="detail-item">
+                    <label>Date d'inscription</label>
+                    <div>{{ selectedDoctor()!.createdAt | date:'d MMMM y, HH:mm':'':'fr' }}</div>
+                  </div>
+                </div>
+
+                <div class="detail-section">
+                  <label>Biographie / Présentation</label>
+                  <p class="bio-box">{{ selectedDoctor()!.bio || 'Aucune biographie fournie.' }}</p>
+                </div>
+
+                <div class="detail-section">
+                  <label>Pièce justificative / Diplôme</label>
+                  @if (selectedDoctor()!.documentUrl) {
+                    <div class="document-box">
+                      <span class="material-icons">description</span>
+                      <div class="doc-info">
+                        <a [href]="selectedDoctor()!.documentUrl" target="_blank" rel="noopener noreferrer" class="doc-link">
+                          Ouvrir la pièce justificative téléversée ↗
+                        </a>
+                        @if (selectedDoctor()!.documentUploadedAt) {
+                          <small>Déposé le {{ selectedDoctor()!.documentUploadedAt | date:'d MMM y, HH:mm':'':'fr' }}</small>
+                        }
+                      </div>
+                    </div>
+                  } @else {
+                    <p class="empty-doc">Aucun document téléversé.</p>
+                  }
+                </div>
+              </div>
+
+              <div class="modal-footer">
+                <button type="button" class="secondary-button" (click)="closeDetail()">Fermer</button>
+                @if (selectedDoctor()!.verificationStatus === 'PENDING') {
+                  <button type="button" class="primary-button success-btn" [disabled]="busyId() === selectedDoctor()!.id" (click)="verifyDoctor(selectedDoctor()!)">
+                    <span class="material-icons">check_circle</span> Valider ce médecin
+                  </button>
+                  <button type="button" class="small-action danger-btn" [disabled]="busyId() === selectedDoctor()!.id" (click)="rejectDoctor(selectedDoctor()!)">
+                    <span class="material-icons">cancel</span> Refuser la demande
+                  </button>
+                }
+                @if (selectedDoctor()!.verificationStatus === 'VERIFIED') {
+                  <button type="button" class="small-action" [disabled]="busyId() === selectedDoctor()!.id" (click)="setDoctorEnabled(selectedDoctor()!)">
+                    {{ selectedDoctor()!.enabled ? 'Suspendre' : 'Réactiver' }}
+                  </button>
+                }
+              </div>
+            </div>
+          </div>
+        }
+
         <footer>ClairSanté · Administration · Données affichées depuis le backend</footer>
       </main>
     </div>
@@ -217,7 +346,39 @@ type AdminSection = 'dashboard' | 'patients' | 'doctors' | 'pending' | 'appointm
     .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin:15px 0}.panel{margin:14px 0;border:1px solid #e6edeb;border-radius:16px;padding:17px;background:#fff}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.panel-heading h2,.panel h2{margin:5px 0 0;color:#23434c;font-size:16px}.panel-heading>.material-icons{color:#148577}.bar-chart{height:160px;display:grid;grid-template-columns:repeat(6,1fr);align-items:end;gap:10px;margin-top:14px}.bar-column{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:end;gap:5px}.bar-column strong{color:#577075;font-size:10px}.bar-column small{color:#819195;font-size:9px}.bar-rail{height:110px;width:min(28px,80%);display:flex;align-items:end;border-radius:8px 8px 2px 2px;background:#f2f6f5}.bar{display:block;width:100%;min-height:2px;border-radius:8px 8px 2px 2px}.registrations{background:linear-gradient(#46b29c,#087e75)}.appointments{background:linear-gradient(#91b5e8,#5279ba)}
     .text-button{border:0;background:transparent;color:#087e75;font:inherit;font-size:11px;font-weight:700;cursor:pointer}.table-wrap{width:100%;overflow-x:auto;margin-top:13px}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{padding:10px 9px;background:#f7faf9;color:#76898d;font-size:9px;font-weight:750}td{padding:11px 9px;border-bottom:1px solid #edf1ef;color:#50676c;font-size:10px}td strong{color:#38575e}tr:last-child td{border-bottom:0}.subtext{display:block;max-width:260px;overflow:hidden;color:#88979a;text-overflow:ellipsis}.small-action,.pagination button{border:1px solid #d7e7e1;border-radius:8px;padding:6px 9px;background:#edf7f3;color:#087e75;font:inherit;font-size:9px;font-weight:700;cursor:pointer}.small-action:disabled{opacity:.5;cursor:wait}.small-action.danger{margin-left:5px;border-color:#f0dddd;background:#fff3f1;color:#a44d48}.status{display:inline-block;border-radius:20px;padding:5px 8px;background:#f1f3f3;color:#68797c;font-size:9px;font-weight:700}.status.verified{background:#e5f5ed;color:#287d5c}.status.pending{background:#fff3dd;color:#a57d31}.status.rejected{background:#fff0ee;color:#a44d48}.status.confirmed{background:#eaf1fc;color:#5279ba}.status.done{background:#e5f5ed;color:#287d5c}.status.cancelled{background:#f1f3f3;color:#68797c}
     .filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:11px}.filters input,.filters select{min-height:36px;max-width:240px;border:1px solid #dfe8e5;border-radius:9px;padding:0 9px;background:#fcfefd;color:#496268;font:inherit;font-size:10px}.primary-button{border:0;border-radius:9px;padding:0 13px;background:#087e75;color:#fff;font:inherit;font-size:10px;font-weight:700;cursor:pointer}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:14px;color:#819195;font-size:10px}.pagination span{margin-right:auto}.pagination button:disabled{opacity:.45;cursor:not-allowed}.empty{padding:22px 8px;color:#879598;text-align:center;font-size:11px}.loading{display:flex;min-height:140px;align-items:center;justify-content:center;gap:9px;color:#7b8d90;font-size:11px}.loader{width:18px;height:18px;border:2px solid #d5e9e3;border-top-color:#087e75;border-radius:50%;animation:spin .7s linear infinite}.privacy-note{display:flex;align-items:center;gap:7px;color:#7b8d90;font-size:10px}.privacy-note .material-icons{color:#168879;font-size:16px}.profile{text-align:center;padding:40px}.avatar.large{width:56px;height:56px;margin:0 auto 16px;font-size:20px}.profile h2{margin:10px 0}.profile p{max-width:500px;margin:0 auto;color:#7d8d90;font-size:12px;line-height:1.7}footer{padding:16px 0;color:#99a4a5;font-size:9px}
-    @keyframes spin{to{transform:rotate(360deg)}}@media(max-width:1000px){.admin-shell{grid-template-columns:205px minmax(0,1fr)}.main{padding:0 18px 20px}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.admin-shell{display:block}.sidebar{position:static;width:auto;height:auto;padding:12px}.brand{margin-bottom:10px}.sidebar nav,.sidebar-bottom{display:flex;overflow-x:auto;gap:3px;margin:0}.sidebar nav button,.sidebar-bottom button{width:auto;min-width:max-content;padding:9px;font-size:10px}.sidebar-bottom{margin-top:5px}.sidebar nav button .material-icons,.sidebar-bottom .material-icons{font-size:16px}.main{padding:0 12px 18px}.topbar{min-height:65px;margin-bottom:15px}.topbar h1{font-size:18px}.admin-email{display:none}.stats-grid{grid-template-columns:1fr 1fr;gap:7px}.stat-card{min-height:77px;gap:8px;padding:9px}.stat-icon{width:31px;height:31px;font-size:16px}.stat-card small{font-size:9px}.stat-card strong{font-size:19px}.chart-grid{grid-template-columns:1fr}.filters>*{flex:1 1 42%;max-width:none!important}.primary-button{min-height:36px}.panel{padding:12px}.pagination{flex-wrap:wrap}.pagination span{flex-basis:100%}}
+    
+    .view-doc-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #cce2dc;border-radius:8px;padding:5px 9px;background:#f3f9f7;color:#087e75;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
+    .view-doc-btn:hover{background:#e2f2ed}
+    .view-doc-btn .material-icons{font-size:15px}
+    .success-btn{background:#e5f5ed;color:#287d5c;border:1px solid #c2e8d7;font-weight:700}
+    .success-btn:hover{background:#d0edd8}
+    .danger-btn{background:#fff0ee;color:#a44d48;border:1px solid #f6cfc9;font-weight:700;display:inline-flex;align-items:center;gap:4px;padding:7px 12px;border-radius:8px;font-size:11px;cursor:pointer}
+    .ml-1{margin-left:6px}
+    .modal-backdrop{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(18,43,51,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(3px);padding:16px}
+    .modal-card{width:100%;max-width:680px;background:#fff;border-radius:18px;box-shadow:0 16px 40px rgba(0,0,0,0.18);display:flex;flex-direction:column;max-height:90vh;overflow:hidden;animation:popIn .2s ease-out}
+    @keyframes popIn{from{opacity:0;transform:scale(0.97)}to{opacity:1;transform:scale(1)}}
+    .modal-header{padding:20px 24px;border-bottom:1px solid #eef2f1;display:flex;justify-content:space-between;align-items:flex-start}
+    .modal-header h2{margin:4px 0 2px;font-size:18px;color:#183d47}
+    .modal-subtitle{margin:0;font-size:10px;color:#88999d}
+    .close-btn{border:0;background:transparent;color:#788b8f;font-size:18px;cursor:pointer;border-radius:8px;width:32px;height:32px;display:grid;place-items:center}
+    .close-btn:hover{background:#f1f4f3;color:#18343d}
+    .modal-body{padding:20px 24px;overflow-y:auto;display:flex;flex-direction:column;gap:18px}
+    .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .detail-item label{display:block;font-size:10px;font-weight:750;color:#73888c;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
+    .detail-item div{font-size:12px;color:#28434a}
+    .detail-section label{display:block;font-size:10px;font-weight:750;color:#73888c;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px}
+    .bio-box{background:#f8faf9;border:1px solid #e5ecea;border-radius:10px;padding:11px;font-size:11px;color:#395257;line-height:1.6;margin:0;white-space:pre-wrap}
+    .document-box{display:flex;align-items:center;gap:12px;background:#eef6f4;border:1px solid #cfe5de;border-radius:10px;padding:12px}
+    .document-box .material-icons{font-size:26px;color:#087e75}
+    .doc-info{display:flex;flex-direction:column;gap:2px}
+    .doc-link{color:#087e75;font-weight:700;font-size:12px;text-decoration:none}
+    .doc-link:hover{text-decoration:underline}
+    .doc-info small{color:#768b8e;font-size:9px}
+    .empty-doc{margin:0;font-size:11px;color:#87989b;font-style:italic}
+    .modal-footer{padding:14px 24px;border-top:1px solid #eef2f1;display:flex;align-items:center;justify-content:flex-end;gap:10px;background:#fbfdfc}
+    .secondary-button{border:1px solid #d5e0dc;border-radius:9px;padding:8px 14px;background:#fff;color:#556e73;font:inherit;font-size:11px;cursor:pointer}
+    .modal-footer .primary-button{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;font-size:11px}
+@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:1000px){.admin-shell{grid-template-columns:205px minmax(0,1fr)}.main{padding:0 18px 20px}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.admin-shell{display:block}.sidebar{position:static;width:auto;height:auto;padding:12px}.brand{margin-bottom:10px}.sidebar nav,.sidebar-bottom{display:flex;overflow-x:auto;gap:3px;margin:0}.sidebar nav button,.sidebar-bottom button{width:auto;min-width:max-content;padding:9px;font-size:10px}.sidebar-bottom{margin-top:5px}.sidebar nav button .material-icons,.sidebar-bottom .material-icons{font-size:16px}.main{padding:0 12px 18px}.topbar{min-height:65px;margin-bottom:15px}.topbar h1{font-size:18px}.admin-email{display:none}.stats-grid{grid-template-columns:1fr 1fr;gap:7px}.stat-card{min-height:77px;gap:8px;padding:9px}.stat-icon{width:31px;height:31px;font-size:16px}.stat-card small{font-size:9px}.stat-card strong{font-size:19px}.chart-grid{grid-template-columns:1fr}.filters>*{flex:1 1 42%;max-width:none!important}.primary-button{min-height:36px}.panel{padding:12px}.pagination{flex-wrap:wrap}.pagination span{flex-basis:100%}}
   `]
 })
 export class AdminDashboardComponent implements OnInit {
@@ -232,6 +393,8 @@ export class AdminDashboardComponent implements OnInit {
   readonly patients = signal<PageResponse<AdminPatient> | null>(null);
   readonly appointments = signal<PageResponse<AdminAppointment> | null>(null);
   readonly auditLogs = signal<PageResponse<AdminAuditLog> | null>(null);
+  readonly selectedDoctor = signal<AdminDoctorDetail | null>(null);
+  readonly loadingDetail = signal(false);
 
   search = '';
   doctorStatus = '';
@@ -356,6 +519,19 @@ export class AdminDashboardComponent implements OnInit {
     });
   }
 
+  openDoctorDetail(doctor: AdminDoctor): void {
+    this.selectedDoctor.set(null);
+    this.loadingDetail.set(true);
+    this.api.adminDoctorDetail(doctor.id).subscribe({
+      next: detail => { this.selectedDoctor.set(detail); this.loadingDetail.set(false); },
+      error: () => { this.loadingDetail.set(false); this.error.set('Impossible de charger le détail du médecin.'); }
+    });
+  }
+
+  closeDetail(): void {
+    this.selectedDoctor.set(null);
+  }
+
   verifyDoctor(doctor: AdminDoctor): void {
     if (!window.confirm(`Valider le compte médecin ${doctor.email} (${doctor.specialty}) ?`)) {
       return;
@@ -364,10 +540,15 @@ export class AdminDashboardComponent implements OnInit {
   }
 
   rejectDoctor(doctor: AdminDoctor): void {
-    if (!window.confirm(`Refuser définitivement la demande de ${doctor.email} ?`)) {
+    const reason = window.prompt(`Motif du refus pour ${doctor.email} ?`, '');
+    if (reason === null) {
       return;
     }
-    this.runDoctorAction(doctor, () => this.api.rejectAdminDoctor(doctor.id), 'La demande médecin a été refusée.');
+    this.runDoctorAction(
+      doctor,
+      () => this.api.rejectAdminDoctor(doctor.id, reason.trim() || undefined),
+      'La demande médecin a été refusée.'
+    );
   }
 
   setDoctorEnabled(doctor: AdminDoctor): void {
@@ -489,14 +670,23 @@ export class AdminDashboardComponent implements OnInit {
           : stats);
         this.busyId.set(null);
         this.message.set(successMessage);
+        if (this.selectedDoctor() && this.selectedDoctor()!.id === updated.id) {
+          this.selectedDoctor.update(d => d ? { ...d, verificationStatus: updated.verificationStatus, enabled: updated.enabled } : null);
+        }
         this.loadStats();
         if (this.section() === 'pending') {
           this.loadDoctors(0);
         }
       },
-      error: () => {
-        this.error.set('L’action administrative a échoué. Actualisez les données et réessayez.');
+      error: (err: any) => {
+        const backendMsg = err?.error?.message || err?.message;
+        if (err?.status === 409 || err?.status === 400) {
+          this.error.set(backendMsg || 'Cette demande a déjà été traitée ou modifiée.');
+        } else {
+          this.error.set(backendMsg || 'L’action administrative a échoué. Actualisez les données et réessayez.');
+        }
         this.busyId.set(null);
+        this.loadDoctors(0);
       }
     });
   }
